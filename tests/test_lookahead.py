@@ -8,7 +8,7 @@ the test is about what `transform` reads.
 import numpy as np
 import polars as pl
 import pytest
-from hypothesis import HealthCheck, given, settings
+from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
 from marketlab import bars, synth
@@ -110,3 +110,72 @@ def test_the_check_catches_a_method_that_looks_ahead(fitted):
     m = Peeking(windows=("1s",))
     full = m.transform(day).filter(pl.col("ts") <= cut)
     assert not same_frames(full, m.transform(day.truncated(cut)))
+
+
+@settings(max_examples=12, deadline=None)
+@given(seed=st.integers(0, 3), at=st.lists(st.floats(0.0, 1.0), min_size=1, max_size=4))
+@example(seed=0, at=[0.9999999999999999])  # one nanosecond before the stop: not a hole yet
+def test_no_fill_changes_when_the_future_is_cut_off(seed, at):
+    """An order's outcome, once final, and a markout, once its horizon has passed, are the
+    same whether or not the data goes on."""
+    from marketlab.execution import Market, Mode, frames, markouts, probe_orders, simulate
+
+    day = scenario_day(seed)
+    m = Market.of(day)
+    lat = 200 * 1_000_000
+    probes = probe_orders(m, "2s", 30_000, "3s") + probe_orders(m, "2s", 30_000, None, False)
+    full = {
+        mode: {
+            r.order.id + 10_000 * (not r.order.passive): r for r in simulate(m, probes, lat, mode)
+        }
+        for mode in Mode
+    }
+    _, fills = frames(list(full[Mode.PESSIMISTIC].values()), "p")
+    marks = markouts(m, fills)
+    start, end = day.runs[0].first_recv_ts, day.runs[0].last_recv_ts
+    for a in at:
+        cut = start + int((end - start) * a)
+        mc = Market.of(day.truncated(cut))
+        early = probe_orders(mc, "2s", 30_000, "3s") + probe_orders(mc, "2s", 30_000, None, False)
+        # the decisions themselves: made from what was known when they were made
+        assert [o for o in probes if o.decided <= cut] == [o for o in early if o.decided <= cut]
+        for mode in Mode:
+            part = {
+                r.order.id + 10_000 * (not r.order.passive): r
+                for r in simulate(mc, early, lat, mode)
+            }
+            for key, r in full[mode].items():
+                if r.final <= cut and r.outcome != "open":
+                    p = part[key]
+                    assert (p.order, p.outcome, p.final, p.fills, p.queue_at_arrival) == (
+                        r.order,
+                        r.outcome,
+                        r.final,
+                        r.fills,
+                        r.queue_at_arrival,
+                    ), (mode, key, cut)
+        _, f = frames([part_r for part_r in simulate(mc, early, lat, Mode.PESSIMISTIC)], "p")
+        cut_marks = markouts(mc, f)
+        for h, n in (("100ms", 100 * 1_000_000), ("1s", S), ("10s", 10 * S)):
+            done = marks.filter(pl.col("ts") + n <= cut).select(
+                "id", "ts", "passive", f"markout_{h}"
+            )
+            again = cut_marks.select("id", "ts", "passive", f"markout_{h}").join(
+                done.select("id", "ts", "passive"), on=["id", "ts", "passive"], how="semi"
+            )
+            assert same_frames(
+                done.sort("id", "passive", "ts"), again.sort("id", "passive", "ts")
+            ), h
+
+
+def test_each_probe_decision_uses_only_what_was_known_at_it():
+    from marketlab.execution import Market, probe_orders
+
+    for seed in range(4):
+        day = scenario_day(seed)
+        probes = probe_orders(Market.of(day), "1s", 100, "1s")
+        times = sorted({o.decided for o in probes})
+        assert len(times) > 20
+        for t in times:
+            known = probe_orders(Market.of(day.truncated(t)), "1s", 100, "1s")
+            assert [o for o in known if o.decided == t] == [o for o in probes if o.decided == t]

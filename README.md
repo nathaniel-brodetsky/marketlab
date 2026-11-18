@@ -2,13 +2,14 @@
 
 Research on order-book data recorded by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec): it reads the recorder's
-tables, leaves out every interval in which the data cannot be trusted, and builds bars and
-microstructure features, with a test that none of them uses data from after its own time.
+tables, leaves out every interval in which the data cannot be trusted, builds bars and
+microstructure features with a test that none of them uses data from after its own time,
+and simulates fills by queue position to measure what trading would have cost.
 
-Status: the first stage of the research side: the contract reader, bars and the first
-layer of features. The execution simulator, the validation protocol (purged
-cross-validation, surrogate data, PBO), Hawkes processes and the viewer come next. There are
-no research results yet. This file lists only what is implemented and tested.
+Status: the contract reader, bars, the first layer of features and the fill simulator with
+markouts. The validation protocol (purged cross-validation, surrogate data, PBO), Hawkes
+processes and the viewer come next. There are no research results yet. This file lists
+only what is implemented and tested.
 
 The data contract is [`SCHEMA.md`](SCHEMA.md), a copy of marketrec's, version 1. marketrec
 only writes those files and marketlab only reads them; the two repositories share nothing
@@ -42,6 +43,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab day DIR` | runs, rows, how much of the time with a connection open is usable, in how many segments, and what was left out |
 | `marketlab bars DIR [--every 1s]` | time bars against tick, volume and dollar bars: return distribution and dependence |
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
+| `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
 
 `--late` keeps the intervals in which the data arrived late (see below).
@@ -53,8 +55,9 @@ marketrec (Rust)                         marketlab (Python)
   WebSocket + REST                         io/        contract checks, valid intervals, segments
   -> frames (primary record)               bars/      time, tick, volume, dollar
   -> Parquet tables + quality journal  ->  features/  layer 1 on the grid of valid book rows
-     (data/binance/<symbol>/<date>/)       registry   every method by name
-                                           next:      execution/, validation/, events/, app/
+     (data/binance/<symbol>/<date>/)       execution/ queue-position fill simulator, markouts
+                                           registry   every method by name
+                                           next:      validation/, events/, app/
 ```
 
 Prices and quantities stay integers (steps of the symbol) until a feature turns them into
@@ -121,6 +124,54 @@ All features are reported on one grid: the `book_l20` rows inside segments, abou
 Every method has `fit(train_days)` and `transform(day)`. A method is one class and one line
 in `marketlab/registry.py`; the tests then cover it.
 
+## Execution
+
+**This simulator cannot be calibrated against reality**: there are no fills of our own to
+compare it with. It is conservative by construction instead: conclusions come from the
+pessimistic queue mode, a passive order fills only when recorded trades reach it, and
+nothing is assumed about the book beyond the recorded levels. Our orders also change
+nothing in the recorded market: no one reacts to them, and the liquidity a market order
+takes is there again for the next one.
+
+Every time is the recorder's receive time. `latency` is how long after a decision an order
+takes effect on that clock: half a round trip to reach the exchange, then one feed lag
+until what happened there is received, so latency = RTT / 2 + lag. `marketlab execution`
+takes both medians from the day's manifest unless `--latency` is given. A cancel takes the
+same time, so an order can fill while its cancel is on the way.
+
+- **Market orders** take liquidity from the book seen when they arrive, level by level;
+  the book is the last `book_l20` row with the depth updates received after it applied.
+- **Passive orders** are post-only: one that would cross the book when it arrives is
+  rejected. Otherwise it joins the end of its price level's queue, behind the level's
+  quantity less the trades at that price already received that the book does not show
+  yet. A trade at its price that hits its side uses up the quantity ahead, then fills the
+  order; a trade at a worse price means the level was taken out and fills it whole.
+  Quantity added to the level joins behind it.
+- **Cancels in the queue.** When a depth update shows the level smaller than the trades
+  since the last update explain, the rest was cancelled, ahead of the order or behind it:
+  the data cannot say. `pessimistic`: all behind; `proportional`: the share ahead is the
+  share of the level ahead of the order; `optimistic`: all ahead. In every mode no more can
+  be ahead than the level holds.
+- Trades are matched to depth updates by exchange time, so a trade received just after the
+  depth update it is part of is neither counted twice nor taken for a cancel. This uses a
+  trade received after the update to reconstruct what the exchange had already done; it
+  never feeds a decision.
+- **Markouts**: for each fill, the mid's change after 100 ms, 1 s and 10 s relative to the
+  fill price, in basis points, signed so that positive is good for us. A passive fill
+  starts with half the spread in its favour; a negative markout is adverse selection. Not
+  computed when the horizon falls outside the fill's segment.
+
+Outcomes: `filled`, `partial` (part filled, the rest cancelled), `cancelled`, `rejected`,
+`unknown` (the queue at the price could not be known), `hole` (the segment ended while the
+order rested), `open` (still resting when the data ends). Fill rates count only the first
+three.
+
+`tests/test_execution.py` builds queues by hand where the answer is known: trades using up
+the queue, cancels in each mode, the cap at the level, a trade through the price, a fill
+while the cancel is on the way, trades seen before arrival, a trade received after its
+depth update, a crossing order, a hole, the end of the data, a market order walking the
+book, signed markouts and markouts stopped by a hole.
+
 ## No look-ahead
 
 The value at time t uses only data received at or before t. `tests/test_lookahead.py` cuts
@@ -131,10 +182,19 @@ check fails on it. The check found one real difference: a matrix product summed 
 different order for a different number of rows, so the same row gave a value differing in
 the last bits; the combination is now summed level by level.
 
-`python scripts/mutants.py` injects 29 one-line faults one at a time (a window that reads
+For the simulator the same file checks that each probe decision equals the one made on the
+day cut at the decision's own time, and that an order's outcome, once final, and a
+markout, once its horizon has passed, do not change when the data after them is removed.
+It found one real error: an order was reported as caught in a hole from the last
+nanosecond of its segment, before the event that ended the segment had been received; a
+hole now counts from that event.
+
+`python scripts/mutants.py` injects 45 one-line faults one at a time (a window that reads
 200 ms ahead, an interval that includes its end, a flow or a return across a hole, a VPIN
-bucket that closes at the next trade, a bar that keeps its unfinished tail, an unchecked
-part, and others) and runs the tests on each: all 29 are caught.
+bucket that closes at the next trade, a bar that keeps its unfinished tail, an order that
+arrives or cancels without latency, cancels that may push the queue past the level, trades
+counted twice, a probe that prices from 300 ms ahead, a markout across a hole, and others)
+and runs the tests on each: all 45 are caught.
 
 ## Numbers
 
@@ -143,8 +203,9 @@ and `features` on it, with the machine and the date.
 
 `python scripts/timing.py` gives a rough size of the work: a synthetic hour with the rates
 of a recorded BTCUSDT hour (about 436 thousand best-price updates, 165 thousand trades,
-36 thousand book rows). On the development container all features took 0.6 s and the bar
-comparison 0.2 s. The market there is a toy, so this is not a result.
+36 thousand book rows). On the development container all features took 0.6 s, the bar
+comparison 0.2 s, and 2,880 simulated orders (one per side every 10 s in three queue modes,
+plus market orders) 3.2 s. The market there is a toy, so this is not a result.
 
 ## Limitations
 
@@ -165,11 +226,15 @@ comparison 0.2 s. The market there is a toy, so this is not a result.
   `--train`; fitting on the day being described would leak.
 - **Receive time.** Every time is the recording machine's; the lag behind the exchange is
   in the manifest, measured with that machine's clock.
+- **The simulator sees the book in 100 ms steps.** Depth updates come every 100 ms, so the
+  queue at arrival and the cancels are known at that resolution; trades are exact.
+- **Memory.** The simulator holds a day's depth updates in memory: for BTCUSDT that is tens
+  of millions of rows, a gigabyte or two. Reading them hour by hour is next.
 
 ## Tests
 
 ```bash
-pytest                     # contract, intervals, bars, features, look-ahead
+pytest                     # contract, intervals, bars, features, execution, look-ahead
 python scripts/mutants.py  # the faults above, each must make the tests fail
 ruff check . && ruff format --check .
 ```

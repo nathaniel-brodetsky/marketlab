@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 import polars as pl
@@ -113,6 +114,57 @@ def cmd_features(a: argparse.Namespace) -> int:
     return 0
 
 
+def _latency(a: argparse.Namespace) -> tuple[str, str]:
+    """The latency to use and where it came from: given, or from the day's manifest as
+    half the median round trip plus the median lag of the data."""
+    if a.latency:
+        return a.latency, "given"
+    m = read_manifest(Path(a.day))
+    rtt = m.raw.get("rtt_p50_ms") if m else None
+    lag = m.raw.get("lag_p50_ms") if m else None
+    if rtt is None or lag is None:
+        raise ContractError(
+            "the manifest has no round trip or lag to derive the latency from: give --latency"
+        )
+    ms = rtt / 2 + lag
+    return f"{ms:g}ms", f"RTT p50 {rtt} ms / 2 + lag p50 {lag} ms, from the manifest"
+
+
+def cmd_execution(a: argparse.Namespace) -> int:
+    from .execution import run, summary
+
+    day = Day.open(a.day, include_late=a.late)
+    latency, source = _latency(a)
+    qty = int(Decimal(a.size) / day.qty_step)
+    if qty <= 0:
+        raise ContractError(f"--size {a.size} is less than one quantity step {day.qty_step}")
+    print(f"latency     {latency} ({source})")
+    print(
+        f"orders      at the best bid and the best ask every {a.every}, {a.size} each, "
+        f"post-only, cancelled after {a.cancel_after}"
+        + (f"; market orders of {a.size} as well" if a.aggressive else "")
+    )
+    orders, fills = run(
+        day,
+        every=a.every,
+        qty=qty,
+        cancel_after=a.cancel_after,
+        latency=latency,
+        aggressive=a.aggressive,
+    )
+    table = summary(orders, fills)
+    with pl.Config(tbl_rows=-1, tbl_cols=-1, tbl_width_chars=250, float_precision=4):
+        print(table)
+    print(
+        "markouts in basis points, positive when the fill was good for us; conclusions "
+        "from the pessimistic row only"
+    )
+    if a.out:
+        fills.write_parquet(a.out)
+        print(f"written     {a.out}")
+    return 0
+
+
 def cmd_synth(a: argparse.Namespace) -> int:
     s = synth.Scenario(
         seed=a.seed,
@@ -149,6 +201,16 @@ def parser() -> argparse.ArgumentParser:
     f.add_argument("--train", nargs="*", default=[], help="days to fit fitted methods on")
     f.add_argument("--out", help="write the features to this Parquet file")
     f.set_defaults(run=cmd_features)
+
+    e = sub.add_parser("execution", help="probe orders through the fill simulator: fills, markouts")
+    day_arg(e)
+    e.add_argument("--every", default="10s", help="one order per side this often (default 10s)")
+    e.add_argument("--size", default="0.001", help="order size in base units (default 0.001)")
+    e.add_argument("--cancel-after", default="10s", help="passive orders' life (default 10s)")
+    e.add_argument("--latency", help="decision to effect, e.g. 300ms (default: from the manifest)")
+    e.add_argument("--aggressive", action="store_true", help="probe market orders as well")
+    e.add_argument("--out", help="write the fills with their markouts to this Parquet file")
+    e.set_defaults(run=cmd_execution)
 
     s = sub.add_parser("synth", help="write a synthetic day to try the commands")
     s.add_argument("out", help="data root, e.g. /tmp/synth")

@@ -184,6 +184,102 @@ M = [
         "    if False:",
         "table metadata unchecked",
     ),
+    (
+        "marketlab/execution/sim.py",
+        "    seg = m.segment(o.decided)\n    if seg < 0:\n        return Result(o, Outcome.HOLE, a, o.decided)\n    seg_end = m.segment_end(seg)\n    if a > seg_end:",
+        "    a = o.decided\n    seg = m.segment(o.decided)\n    if seg < 0:\n        return Result(o, Outcome.HOLE, a, o.decided)\n    seg_end = m.segment_end(seg)\n    if a > seg_end:",
+        "passive order without arrival latency",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "        end = min(end, o.cancel + latency)",
+        "        end = min(end, o.cancel)",
+        "cancel without latency",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        '    ahead = max(level - int(tr["qty"][seen][early].sum()), 0)',
+        "    ahead = level",
+        "queue ignores trades seen by the arrival",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        '            if tr["trade_ts"][k] <= e0:\n                continue',
+        "            if False:\n                continue",
+        "trades already in the book count again",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "            pending = traded - applied  # part of this update, not received yet",
+        "            pending = 0",
+        "late trades taken for cancels",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "            now_ahead = min(max(now_ahead, 0), new)",
+        "            now_ahead = max(now_ahead, 0)",
+        "more ahead than the level",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "                now_ahead -= cancelled * now_ahead / before",
+        "                now_ahead -= cancelled / 2",
+        "proportional share wrong",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "    if other is not None and (o.price >= other[0] if o.side == BID else o.price <= other[0]):",
+        "    if False:",
+        "crossing orders accepted",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        '    hits_side = tr["is_buyer_maker"] if o.side == BID else ~tr["is_buyer_maker"]',
+        '    hits_side = ~tr["is_buyer_maker"] if o.side == BID else tr["is_buyer_maker"]',
+        "wrong aggressor fills",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "            if through[k]:",
+        "            if False:",
+        "trade-through ignored",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "    taken = book.walk(-o.side, o.qty)  # a buy takes from the asks",
+        "    taken = book.walk(o.side, o.qty)",
+        "market order takes its own side",
+    ),
+    (
+        "marketlab/execution/__init__.py",
+        "            mk = side * (mid - price) / price * 1e4",
+        "            mk = (mid - price) / price * 1e4",
+        "markout unsigned",
+    ),
+    (
+        "marketlab/execution/__init__.py",
+        '            i = int(np.searchsorted(t["recv_ts"], when, side="right")) - 1',
+        '            i = int(np.searchsorted(t["recv_ts"], when + 300_000_000, side="right")) - 1',
+        "probe price from the future",
+    ),
+    (
+        "marketlab/execution/market.py",
+        "        ok = (seg >= 0) & (i >= 0) & (ts < ends[s]) & (r[j] >= starts[s])",
+        "        ok = (seg >= 0) & (i >= 0) & (r[j] >= starts[s])",
+        "markout past its segment",
+    ),
+    (
+        "marketlab/execution/market.py",
+        "        ok = (seg >= 0) & (i >= 0) & (ts < ends[s]) & (r[j] >= starts[s])",
+        "        ok = (seg >= 0) & (i >= 0) & (ts < ends[s])",
+        "markout from a price before the hole",
+    ),
+    (
+        "marketlab/execution/market.py",
+        '    hi = int(np.searchsorted(d["recv_ts"], ts, side="right"))',
+        "    hi = lo",
+        "book without later depth updates",
+    ),
 ]
 survived = []
 for f, old, new, label in M:
