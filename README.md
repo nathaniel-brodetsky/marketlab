@@ -47,7 +47,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab bars DIR [--every 1s]` | time bars against tick, volume and dollar bars: return distribution and dependence |
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
-| `marketlab experiment run SPEC --data ROOT [--final]` | run a committed hypothesis through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
+| `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, or a `maker` rule) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
 | `marketlab experiment list` | every recorded hypothesis with its verdict and its p-value adjusted for all of them |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
 
@@ -265,7 +265,27 @@ checks the commit rule and the one-time held-out days.
 **The first experiment** (`experiments/001-mlofi.yaml`): multi-level OFI of the last second
 over the best ten levels, weights fitted on the training days, against the mid's return
 over the next second; six variants for PBO; 4 of the 21 free days of Tardis.dev held out.
-It has not run on the recorded days yet.
+On the 17 development days it passed (rank IC 0.29, positive on every day, surrogates at
+most 0.002, PBO 0.20); the move it forecasts is about 0.3 bp a second on average and 1 bp
+at most, far below a taker's fees.
+
+**Hypotheses about trading rules** have a `kind`. `kind: maker` (`marketlab/maker.py`)
+asks whether a signal cuts what passive orders lose to adverse selection: probe orders at
+the best prices go through the fill simulator once per day, and a rule withdraws an order
+when the signal turns against it. Withdrawing changes nothing before it takes effect, so
+every rule and every surrogate follows from that one simulation (an order withdrawn at `t`
+keeps the fills received by `t + latency`; `tests/test_maker.py` checks this against the
+simulator itself). The metric is the fills' quantity-weighted mean markout with the rule
+minus without it, by day; with no fitted part the days are scored directly. Controls: the
+signal rolled within its day by at least ten minutes (same withdrawals, wrong times), PBO
+over the variants, Benjamini-Hochberg over the registry, the pessimistic queue for the
+verdict and the other two for sensitivity. The report gives the mean markout with the rule
+as the maker fee at which it breaks even. `experiments/002-maker-ofi-pull.yaml` is the
+first: level-1 OFI of the last second, scaled by its spread over the hour before, beyond
+one unit against the order, 10-second markouts, the same held-out days as 001.
+
+The held-out days are opened only after every hypothesis meant for them is committed, so
+that none is written having seen them.
 
 ## No look-ahead
 

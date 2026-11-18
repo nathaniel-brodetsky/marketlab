@@ -466,6 +466,54 @@ M = [
         "    breaks = np.zeros(0, dtype=np.int64)",
         "the replay's mid bridges a hole",
     ),
+    (
+        "marketlab/maker.py",
+        '    return (w < 0) | (fills["ts"].to_numpy() <= w + latency)',
+        '    return (w < 0) | (fills["ts"].to_numpy() <= w)',
+        "a withdrawal takes effect at once",
+    ),
+    (
+        "marketlab/maker.py",
+        "        for s, against in ((1, z < -threshold), (-1, z > threshold)):",
+        "        for s, against in ((1, z > threshold), (-1, z < -threshold)):",
+        "orders withdrawn when the signal is for them",
+    ),
+    (
+        "marketlab/maker.py",
+        "    stale = (first < 0) | (decided >= seg_end[np.clip(first, 0, None)])",
+        "    stale = first < 0",
+        "a row from before a hole read after it",
+    ),
+    (
+        "marketlab/maker.py",
+        "            when = np.maximum(ts[np.clip(j, 0, n - 1)], decided[k])",
+        "            when = ts[np.clip(j, 0, n - 1)]",
+        "an order withdrawn before it was decided",
+    ),
+    (
+        "marketlab/maker.py",
+        "        return self.rule - self.base",
+        "        return self.base - self.rule",
+        "the difference the wrong way round",
+    ),
+    (
+        "marketlab/maker.py",
+        "            deltas.append(score(x, spec, v, spec.queue, np.roll(z, lag)).delta)",
+        "            deltas.append(score(x, spec, v, spec.queue, z).delta)",
+        "surrogates not shifted",
+    ),
+    (
+        "marketlab/maker.py",
+        '    lo = np.searchsorted(ts, ts - span, side="left")',
+        "    lo = np.zeros(len(ts), dtype=np.int64)",
+        "the signal scaled by the whole past, not the hour",
+    ),
+    (
+        "marketlab/maker.py",
+        "    p = float(stats.t.sf(mean / se, ok.sum() - 1)) if se > 0 else (0.0 if mean > 0 else 1.0)",
+        "    p = float(stats.t.cdf(mean / se, ok.sum() - 1)) if se > 0 else (0.0 if mean > 0 else 1.0)",
+        "p from the wrong tail",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

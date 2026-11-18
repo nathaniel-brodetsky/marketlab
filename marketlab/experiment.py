@@ -114,6 +114,7 @@ def load_spec(path: str | Path) -> Spec:
     known = {
         "id",
         "name",
+        "kind",
         "hypothesis",
         "data",
         "sampling",
@@ -123,6 +124,8 @@ def load_spec(path: str | Path) -> Spec:
         "protocol",
         "success",
     }
+    if raw.get("kind", "forecast") != "forecast":
+        raise ExperimentError(f"{path}: a `{raw['kind']}` hypothesis, not a forecast")
     unknown = set(raw) - known
     if unknown:
         raise ExperimentError(f"{path}: unknown keys {sorted(unknown)}")

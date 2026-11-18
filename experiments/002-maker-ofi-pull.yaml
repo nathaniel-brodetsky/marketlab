@@ -1,0 +1,50 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+id: "002"
+name: maker-ofi-pull
+kind: maker
+hypothesis: >
+  Passive orders at the best price that are withdrawn whenever the order-flow imbalance of
+  the last second points against them (level 1, divided by its standard deviation over the
+  hour before, beyond one unit) lose less to adverse selection than the same orders left to
+  rest: the quantity-weighted mean 10-second markout of their fills is higher, under the
+  pessimistic queue at 300 ms latency, beyond what the same rule finds with the imbalance
+  shifted in time.
+
+data:
+  symbol: BTCUSDT
+  min_hours: 20
+  min_days: 12
+  holdout: [2026-08-01, 2026-09-01, 2026-10-01, 2026-11-01]   # opened once, at the end
+
+orders:                  # the probe orders of `marketlab execution`
+  every: 10s             # a bid and an ask at the best prices at each multiple
+  size: 0.001            # base units
+  cancel_after: 10s
+  latency: 300ms         # from a decision to its effect, on the receive clock
+  queue: pessimistic     # conclusions; the other two modes are reported for sensitivity
+
+signal:
+  method: ofi_z
+  params: {window: 1s, threshold: 1.0}
+
+variants:                # the same hypothesis with other parameters, for PBO
+  - {window: 1s, threshold: 0.5}
+  - {window: 1s, threshold: 1.0}
+  - {window: 1s, threshold: 2.0}
+  - {window: 5s, threshold: 0.5}
+  - {window: 5s, threshold: 1.0}
+  - {window: 5s, threshold: 2.0}
+
+target: {markout: 10s}   # the signal's move is mostly over by 30 s; 10 s is the spec's longest
+
+protocol:
+  surrogates: 200        # the imbalance rolled within its day by at least min_shift
+  min_shift: 10m
+  seed: 2
+
+success:
+  min_delta_bp: 0.0      # mean difference over the days, with the rule minus without
+  alpha: 0.05            # p (one-sided t over days) after Benjamini-Hochberg
+  surrogate_percentile: 95
+  max_pbo: 0.5
+  min_positive_days: 0.6

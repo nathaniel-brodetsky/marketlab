@@ -9,6 +9,7 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 
 from . import bars, synth
@@ -250,10 +251,98 @@ def print_report(r) -> None:
     print(f"verdict     {r.verdict}{reasons}")
 
 
+def kind_of(spec_path: Path) -> str:
+    """A hypothesis's kind: `forecast` (the default), `maker` or `volatility`."""
+    import yaml
+
+    raw = yaml.safe_load(spec_path.read_text())
+    return str(raw.get("kind", "forecast")) if isinstance(raw, dict) else "forecast"
+
+
+def print_maker_report(r) -> None:
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    print(f"experiment  {r.spec.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    days = [d.date for d in r.days]
+    span = f"{days[0]} .. {days[-1]}" if days else "none"
+    print(f"days        {len(days)}, {span}; held out: {', '.join(r.spec.holdout) or 'none'}")
+    if r.skipped:
+        short = ", ".join(f"{d.date} {d.usable_hours:.1f} h" for d in r.skipped)
+        print(f"skipped     under {r.spec.min_hours:g} usable hours: {short}")
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    s, h = r.spec, r.spec.horizon
+    base = np.nanmean([x.base for x in r.by_day.values()])
+    rule = np.nanmean([x.rule for x in r.by_day.values()])
+    kept = np.nanmean([x.fills_kept for x in r.by_day.values()])
+    print(
+        f"orders      every {s.every} each side, {s.size} base, cancelled after "
+        f"{s.cancel_after}, latency {s.latency}, {s.queue} queue"
+    )
+    print(
+        f"markout {h:<4}without the rule {base:+.3f} bp, with it {rule:+.3f} bp "
+        f"(mean of days); the rule keeps {kept:.0%} of the filled quantity"
+    )
+    print(
+        f"difference  {r.mean_delta:+.4f} +- {r.se:.4f} bp, p {r.p:.2g}, "
+        f"positive on {r.positive_share:.0%} of {len(r.by_day)} days"
+    )
+    sh = r.surrogate["shift"]
+    if sh["threshold"] is None:
+        print("surrogates  shift  none: no day long enough to shift the signal")
+    else:
+        print(
+            f"surrogates  shift  real {sh['real']:+.4f}, {sh['percentile']:g}th percentile "
+            f"of {sh['n']}: {sh['threshold']:+.4f}, p {sh['p']:.3g}"
+        )
+    if r.pbo:
+        print(f"pbo         {r.pbo.pbo:.2f} over {len(s.variants)} variants")
+    for name, v in r.variants.items():
+        print(f"variant     {name}: {v:+.4f} bp" if v is not None else f"variant     {name}: -")
+    print("queue       " + ", ".join(f"{m} {v:+.4f}" for m, v in r.modes.items() if v is not None))
+    st = r.stability
+
+    def fmt(d: dict) -> str:
+        return ", ".join(f"{k} {v:+.4f}" if v is not None else f"{k} -" for k, v in d.items())
+
+    print(f"by time     {fmt(st['time_of_day'])}")
+    print(f"by vol      {fmt(st['volatility_tercile'])}")
+    print(
+        f"break-even  a maker fee below {rule:+.3f} bp per fill (negative: a rebate of that "
+        f"size) at {h}, before any other cost"
+    )
+    print(f"p, BH       {r.p_bh:.3g} with every hypothesis in the registry")
+    reasons = f": {'; '.join(r.reasons)}" if r.reasons else ""
+    print(f"verdict     {r.verdict}{reasons}")
+
+
 def cmd_experiment_run(a: argparse.Namespace) -> int:
     from . import experiment as ex
 
     spec_path = Path(a.spec)
+    kind = kind_of(spec_path)
+    if kind == "maker":
+        from . import maker
+
+        spec = maker.load_spec(spec_path)
+        results = _repo_dir(spec_path, "results", a.results)
+        cache = _repo_dir(spec_path, ".cache", a.cache)
+        if a.final:
+            rec = maker.final(spec, a.data, results, cache)
+            print(f"held out    {', '.join(rec['days'])}: opened once, now recorded")
+            print(f"difference  {rec['mean_delta_bp']:+.4f} bp (mean of days)")
+            for d, x in rec["by_day"].items():
+                print(
+                    f"            {d}: {x['delta']:+.4f}"
+                    if x["delta"] is not None
+                    else f"            {d}: -"
+                )
+            return 0
+        report = maker.run(spec, a.data, results, cache, workers=a.workers)
+        print_maker_report(report)
+        print(f"written     {results / (spec.slug + '.json')}")
+        return 0
     spec = ex.load_spec(spec_path)
     results = _repo_dir(spec_path, "results", a.results)
     cache = _repo_dir(spec_path, ".cache", a.cache)
