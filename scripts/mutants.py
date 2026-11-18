@@ -280,6 +280,84 @@ M = [
         "    hi = lo",
         "book without later depth updates",
     ),
+    (
+        "marketlab/validation/splits.py",
+        "        train_mask &= ~((t1 >= lo) & (t0 <= hi))",
+        "        pass",
+        "no purging",
+    ),
+    (
+        "marketlab/validation/splits.py",
+        "        lo, hi = t0[mine].min(), t1[mine].max() + embargo",
+        "        lo, hi = t0[mine].min(), t1[mine].max()",
+        "no embargo",
+    ),
+    (
+        "marketlab/validation/splits.py",
+        "    return [{g: v[j] for g, v in by_group.items()} for j in range(n)]",
+        "    return [{g: v[0] for g, v in by_group.items()} for j in range(n)]",
+        "every path the same split",
+    ),
+    (
+        "marketlab/validation/metrics.py",
+        "        v += 2 * (1 - k / (lags + 1)) * (e[k:] @ e[:-k]) / n",
+        "        v += 0 * (e[k:] @ e[:-k]) / n",
+        "Newey-West without the lags",
+    ),
+    (
+        "marketlab/validation/metrics.py",
+        "    r = stats.rankdata(x)",
+        "    r = np.asarray(x, dtype=float)",
+        "IC on values, not ranks",
+    ),
+    (
+        "marketlab/validation/metrics.py",
+        "    se = float(np.sqrt(sum(x.se**2 for x in d)) / len(d))",
+        "    se = float(np.sqrt(sum(x.se**2 for x in d)) / len(d) ** 2)",
+        "error of the mean too small",
+    ),
+    (
+        "marketlab/validation/pbo.py",
+        "        best = int(np.argmax(is_perf))",
+        "        best = int(np.argmax(oos))",
+        "PBO picks with hindsight",
+    ),
+    (
+        "marketlab/validation/multiple.py",
+        "    ranked = p[order] * n / np.arange(1, n + 1)",
+        "    ranked = p[order] * n",
+        "Bonferroni instead of BH",
+    ),
+    (
+        "marketlab/validation/multiple.py",
+        "    return float(np.sqrt(trials_var) * z)",
+        "    return 0.0",
+        "trials not deflated",
+    ),
+    (
+        "marketlab/validation/surrogates.py",
+        "    return np.roll(x, int(rng.integers(min_lag, n - min_lag + 1)))",
+        "    return np.roll(x, 0)",
+        "shift surrogate not shifted",
+    ),
+    (
+        "marketlab/experiment.py",
+        "    infos = select_days(data_root, spec.symbol, spec.min_hours, exclude=spec.holdout)",
+        "    infos = select_days(data_root, spec.symbol, spec.min_hours)",
+        "held-out days used in the run",
+    ),
+    (
+        "marketlab/experiment.py",
+        '    dirty = bool(_git(["status", "--porcelain", "--untracked-files=no"], root).stdout.strip())',
+        "    dirty = False",
+        "uncommitted code not recorded",
+    ),
+    (
+        "marketlab/targets/__init__.py",
+        '        cols[f"ret_{h}"] = np.where(inside, r, np.nan)',
+        '        cols[f"ret_{h}"] = r',
+        "returns across a hole",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

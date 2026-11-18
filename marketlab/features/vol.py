@@ -9,6 +9,7 @@ import polars as pl
 
 from ..io.day import Day
 from .base import (
+    Grid,
     Method,
     duration_ns,
     grid,
@@ -32,6 +33,9 @@ class Volatility(Method):
 
     def transform(self, day: Day) -> pl.DataFrame:
         g = grid(day)
+        return g.frame(self.columns(g))
+
+    def columns(self, g: Grid) -> dict[str, np.ndarray]:
         mid = mid_ticks(g.book)
         r2 = np.zeros(len(g))
         prev = same_segment_prev(g)
@@ -46,4 +50,4 @@ class Volatility(Method):
             hi = rolling_extreme(mid, g, n, np.maximum)
             lo = rolling_extreme(mid, g, n, np.minimum)
             cols[f"range_{w}"] = (hi - lo) / mid * 1e4
-        return g.frame(cols)
+        return cols

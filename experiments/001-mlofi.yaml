@@ -1,0 +1,44 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+id: "001"
+name: mlofi-1s
+hypothesis: >
+  The multi-level order-flow imbalance of the last second, over the best ten levels with
+  weights fitted on the training days (Xu, Gould, Howison 2019), has a positive rank
+  correlation with the mid's return over the next second, out of sample, beyond what the
+  same computation finds on surrogate data.
+
+data:
+  symbol: BTCUSDT
+  min_hours: 20          # days with less usable data are left out
+  min_days: 12           # fewer development days: insufficient data
+  holdout: [2026-08-01, 2026-09-01, 2026-10-01, 2026-11-01]   # opened once, at the end
+
+sampling: 1s             # the first grid row of each second
+
+feature:
+  method: mlofi
+  params: {levels: 10, window: 1s}
+
+variants:                # the same hypothesis with other parameters, for PBO
+  - {levels: 1, window: 1s}
+  - {levels: 2, window: 1s}
+  - {levels: 5, window: 1s}
+  - {levels: 10, window: 1s}
+  - {levels: 1, window: 5s}
+  - {levels: 10, window: 5s}
+
+target: {kind: return, horizon: 1s}
+
+protocol:
+  folds: 5               # purged k-fold over days
+  cpcv_test_groups: 2    # every pair of days as the test set
+  embargo: 60s
+  surrogates: 200        # of each kind: block, iaaft, shift
+  seed: 1
+
+success:
+  min_ic: 0.0            # mean IC over the CPCV paths must be above
+  alpha: 0.05            # p after Benjamini-Hochberg over the registry must be below
+  surrogate_percentile: 95
+  max_pbo: 0.5
+  min_positive_days: 0.6

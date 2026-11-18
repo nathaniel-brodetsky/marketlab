@@ -4,12 +4,14 @@ Research on order-book data recorded by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec): it reads the recorder's
 tables, leaves out every interval in which the data cannot be trusted, builds bars and
 microstructure features with a test that none of them uses data from after its own time,
-and simulates fills by queue position to measure what trading would have cost.
+simulates fills by queue position to measure what trading would have cost, and runs each
+hypothesis through one validation protocol from a file committed before the run.
 
-Status: the contract reader, bars, the first layer of features and the fill simulator with
-markouts. The validation protocol (purged cross-validation, surrogate data, PBO), Hawkes
-processes and the viewer come next. There are no research results yet. This file lists
-only what is implemented and tested.
+Status: the contract reader, bars, the first layer of features, the fill simulator with
+markouts, and the validation protocol with its first experiment written down
+(`experiments/001-mlofi.yaml`). Its result goes into `results/` once it has run on the
+recorded days, whatever the verdict. Hawkes processes and the viewer come next. This file
+lists only what is implemented and tested.
 
 The data contract is [`SCHEMA.md`](SCHEMA.md), a copy of marketrec's, version 1. marketrec
 only writes those files and marketlab only reads them; the two repositories share nothing
@@ -44,6 +46,8 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab bars DIR [--every 1s]` | time bars against tick, volume and dollar bars: return distribution and dependence |
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
+| `marketlab experiment run SPEC --data ROOT [--final]` | run a committed hypothesis through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
+| `marketlab experiment list` | every recorded hypothesis with its verdict and its p-value adjusted for all of them |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
 
 `--late` keeps the intervals in which the data arrived late (see below).
@@ -56,8 +60,13 @@ marketrec (Rust)                         marketlab (Python)
   -> frames (primary record)               bars/      time, tick, volume, dollar
   -> Parquet tables + quality journal  ->  features/  layer 1 on the grid of valid book rows
      (data/binance/<symbol>/<date>/)       execution/ queue-position fill simulator, markouts
+                                           targets/   future returns and volatility
+                                           validation/ splits, IC, surrogates, PBO, FDR, DSR
+                                           experiment hypothesis file -> verdict
+                                           experiments/ one YAML per hypothesis, committed first
+                                           results/   one JSON per run, failures included
                                            registry   every method by name
-                                           next:      validation/, events/, app/
+                                           next:      events/, app/
 ```
 
 Prices and quantities stay integers (steps of the symbol) until a feature turns them into
@@ -172,6 +181,53 @@ while the cancel is on the way, trades seen before arrival, a trade received aft
 depth update, a crossing order, a hole, the end of the data, a market order walking the
 book, signed markouts and markouts stopped by a hole.
 
+## Validation protocol
+
+A result counts only if it passes all six steps, the same for every method, so results can
+be compared with each other.
+
+1. **The hypothesis before the run.** `experiments/NNN-name.yaml` fixes the data, the
+   feature and its parameters, the target and horizon, the variants, the protocol's
+   settings and the bar to clear. `marketlab experiment run` refuses a file that is not
+   committed or has changed since its commit, and writes the file's commit and the code's
+   commit into the result; code with uncommitted changes is allowed but recorded.
+2. **Splits by time.** Out-of-sample predictions come from purged k-fold over days: a
+   training sample whose span (from the start of its feature window to the end of its
+   target) meets a test day's span, widened by the embargo, is dropped. The estimate is a
+   distribution over the paths of combinatorial purged cross-validation, not one number.
+   The last days are held out; `--final` opens them once and a second time is refused.
+3. **Surrogate data.** The out-of-sample prediction and the target are misaligned three
+   ways, at least 200 times each: minute blocks of the prediction shuffled, the prediction
+   replaced by an IAAFT surrogate of itself (same values, nearly the same spectrum), the
+   target shifted by at least ten horizons. The real IC must beat the 95th percentile of
+   each. The random numbers depend only on the seed, so the surrogates come out the same
+   on any number of processes.
+4. **Multiple tests.** Benjamini-Hochberg over every hypothesis in `results/`, failed ones
+   included; the probability of backtest overfitting (CSCV) over the hypothesis's variants;
+   the deflated Sharpe ratio for trading rules.
+5. **Costs.** A trading rule is judged through the fill simulator, with the pessimistic
+   queue. (No trading rule has been written down yet.)
+6. **Stability.** The IC by day, by six hours of the day and by the volatility of the
+   minute before: a signal that works one day in seven is not a signal.
+
+The metric for a forecast of returns is the rank IC by day, with Newey-West standard errors
+because samples overlap when the horizon is longer than their spacing; days are taken as
+independent. Each run ends in `results/NNN-name.json` with one of three verdicts:
+`passed`, `failed`, `insufficient data`, and the reasons.
+
+`tests/test_validation.py` checks each statistic against an answer worked out in advance:
+purging and embargo sample by sample, the CPCV paths, Newey-West against the plain error,
+the IC against SciPy's Spearman, surrogates that keep the values and lose the order, PBO
+of zero for a real edge and one for a trap, Benjamini-Hochberg by hand, and the deflated
+Sharpe ratio paying for trials. `tests/test_experiment.py` runs the protocol on data with a
+planted signal (it passes every step) and without one (it fails on the surrogates), and
+checks the commit rule and the one-time held-out days.
+
+**The first experiment** (`experiments/001-mlofi.yaml`): multi-level OFI of the last second
+over the best ten levels, weights fitted on the training days, against the mid's return
+over the next second; six variants for PBO; 4 of the 21 free days of Tardis.dev held out.
+It has not run on the recorded days yet.
+
 ## No look-ahead
 
 The value at time t uses only data received at or before t. `tests/test_lookahead.py` cuts
@@ -194,7 +250,10 @@ hole now counts from that event.
 bucket that closes at the next trade, a bar that keeps its unfinished tail, an order that
 arrives or cancels without latency, cancels that may push the queue past the level, trades
 counted twice, a probe that prices from 300 ms ahead, a markout across a hole, and others)
-and runs the tests on each: all 45 are caught.
+and runs the tests on each: all 45 are caught. For the protocol it adds 13 more: no purging,
+no embargo, every CPCV path through the same split, Newey-West without its lags, the IC on
+values instead of ranks, the held-out days used in the run, a shift surrogate that does not
+shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg, and others.
 
 ## Numbers
 
@@ -230,11 +289,19 @@ plus market orders) 3.2 s. The market there is a toy, so this is not a result.
   queue at arrival and the cancels are known at that resolution; trades are exact.
 - **Memory.** The simulator holds a day's depth updates in memory: for BTCUSDT that is tens
   of millions of rows, a gigabyte or two. Reading them hour by hour is next.
+- **The surrogates test the alignment, not the fit.** Multi-level OFI is fitted on the mid's
+  change over the same window, not on the target, so the surrogates misalign the finished
+  out-of-sample prediction with the target instead of refitting on each surrogate.
+- **Days as independent units.** The recorded days are a month apart, so purging and the
+  embargo remove nothing between them; they matter once consecutive days are recorded.
+- **Experiment files** take `mlofi` as the feature and `return` as the target so far; other
+  methods are added to the runner as they get experiments.
 
 ## Tests
 
 ```bash
-pytest                     # contract, intervals, bars, features, execution, look-ahead
+pytest                     # contract, intervals, bars, features, execution, look-ahead,
+                           # validation statistics, the experiment runner
 python scripts/mutants.py  # the faults above, each must make the tests fail
 ruff check . && ruff format --check .
 ```

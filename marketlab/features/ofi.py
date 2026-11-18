@@ -112,7 +112,8 @@ class MultiLevelOFI(Method):
         self.weights_: np.ndarray | None = None
         self.r2_: float | None = None
 
-    def _level_windows(self, day: Day, g: Grid) -> np.ndarray:
+    def level_windows(self, day: Day, g: Grid) -> np.ndarray:
+        """Each level's OFI over the window at each grid row, rows by levels; needs no fit."""
         e = level_flows(g.book, self.levels)
         w = duration_ns(self.window)
         unit = float(day.qty_step)
@@ -126,7 +127,7 @@ class MultiLevelOFI(Method):
         xs, ys = [], []
         for day in train:
             g = grid(day)
-            x = self._level_windows(day, g)
+            x = self.level_windows(day, g)
             y = mid_change(g, duration_ns(self.window))
             ok = np.isfinite(y) & np.isfinite(x).all(axis=1)
             xs.append(x[ok])
@@ -145,7 +146,7 @@ class MultiLevelOFI(Method):
         if self.weights_ is None:
             raise NotFitted(f"{self.name}: fit on training days first")
         g = grid(day)
-        x = self._level_windows(day, g)
+        x = self.level_windows(day, g)
         cols = {f"ofi_l{m + 1}_{self.window}": x[:, m] for m in range(self.levels)}
         # level by level rather than `x @ weights`: a matrix product may sum in another
         # order for another number of rows, and the same row must give the same value

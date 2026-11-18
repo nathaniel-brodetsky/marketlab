@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import sys
 from decimal import Decimal
 from pathlib import Path
@@ -165,6 +166,97 @@ def cmd_execution(a: argparse.Namespace) -> int:
     return 0
 
 
+def _repo_dir(spec: Path, name: str, given: str | None) -> Path:
+    """`given`, or `name` at the top of the git repository holding the spec."""
+    if given:
+        return Path(given)
+    import subprocess
+
+    top = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"],
+        cwd=spec.resolve().parent,
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.strip()
+    return Path(top or ".") / name
+
+
+def print_report(r) -> None:
+    j = r.to_json()
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    print(f"experiment  {r.spec.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    days = [d.date for d in r.days]
+    span = f"{days[0]} .. {days[-1]}" if days else "none"
+    print(f"days        {len(days)}, {span}; held out: {', '.join(r.spec.holdout) or 'none'}")
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    k = r.kfold
+    print(
+        f"k-fold      IC {k.mean:.4f} +- {k.se:.4f} (Newey-West, {r.lags} lags), "
+        f"p {k.p:.2g}, positive on {k.positive_share:.0%} of {k.days} days"
+    )
+    c = j["cpcv"]
+    print(
+        f"cpcv        {c['paths']} paths: mean {c['mean']:.4f}, std {c['std']:.4f}, "
+        f"min {c['min']:.4f}, positive {c['positive_share']:.0%}"
+    )
+    for kind, s in r.surrogate.items():
+        print(
+            f"surrogates  {kind:<6} real {s['real']:.4f}, {s['percentile']:g}th percentile "
+            f"of {s['n']}: {s['threshold']:.4f}, p {s['p']:.3g}"
+        )
+    if r.pbo:
+        print(
+            f"pbo         {r.pbo.pbo:.2f} over {len(r.spec.variants)} variants "
+            f"({r.pbo.combinations} combinations)"
+        )
+    for name, ic in r.variants.items():
+        print(f"variant     {name}: IC {ic:.4f}" if ic is not None else f"variant     {name}: -")
+    st = r.stability
+
+    def fmt(d: dict) -> str:
+        return ", ".join(f"{k} {v:.4f}" if v is not None else f"{k} -" for k, v in d.items())
+
+    print(f"by time     {fmt(st['time_of_day'])}")
+    print(f"by vol      {fmt(st['volatility_tercile'])}")
+    print(f"p, BH       {r.p_bh:.3g} with every hypothesis in the registry")
+    reasons = f": {'; '.join(r.reasons)}" if r.reasons else ""
+    print(f"verdict     {r.verdict}{reasons}")
+
+
+def cmd_experiment_run(a: argparse.Namespace) -> int:
+    from . import experiment as ex
+
+    spec_path = Path(a.spec)
+    spec = ex.load_spec(spec_path)
+    results = _repo_dir(spec_path, "results", a.results)
+    cache = _repo_dir(spec_path, ".cache", a.cache)
+    if a.final:
+        rec = ex.final(spec, a.data, results, cache)
+        s = rec["summary"]
+        print(f"held out    {', '.join(rec['days'])}: opened once, now recorded")
+        print(f"IC          {s['mean']:.4f} +- {s['se']:.4f}, p {s['p']:.2g}")
+        for d, ic in rec["ic_by_day"].items():
+            print(f"            {d}: {ic:.4f}" if ic is not None else f"            {d}: -")
+        return 0
+    report = ex.run(spec, a.data, results, cache, workers=a.workers)
+    print_report(report)
+    print(f"written     {results / (spec.slug + '.json')}")
+    return 0
+
+
+def cmd_experiment_list(a: argparse.Namespace) -> int:
+    from . import experiment as ex
+
+    table = ex.registry_table(Path(a.results))
+    with pl.Config(tbl_rows=-1, tbl_cols=-1, tbl_width_chars=200, float_precision=4):
+        print(table)
+    return 0
+
+
 def cmd_synth(a: argparse.Namespace) -> int:
     s = synth.Scenario(
         seed=a.seed,
@@ -212,6 +304,27 @@ def parser() -> argparse.ArgumentParser:
     e.add_argument("--out", help="write the fills with their markouts to this Parquet file")
     e.set_defaults(run=cmd_execution)
 
+    x = sub.add_parser("experiment", help="run a hypothesis through the protocol")
+    xs = x.add_subparsers(dest="action", required=True)
+    xr = xs.add_parser("run", help="run a committed experiments/NNN-name.yaml")
+    xr.add_argument("spec")
+    xr.add_argument("--data", required=True, help="data root of marketrec, e.g. ../marketrec/data")
+    xr.add_argument("--results", help="default: results/ next to experiments/")
+    xr.add_argument("--cache", help="per-day inputs; default: .cache/ next to experiments/")
+    xr.add_argument(
+        "--final", action="store_true", help="open the held-out days, once, after the run"
+    )
+    xr.add_argument(
+        "--workers",
+        type=int,
+        default=max(1, (os.cpu_count() or 2) - 1),
+        help="processes for the surrogates (default: all cores but one)",
+    )
+    xr.set_defaults(run=cmd_experiment_run)
+    xl = xs.add_parser("list", help="every recorded hypothesis, with p adjusted for all")
+    xl.add_argument("--results", default="results")
+    xl.set_defaults(run=cmd_experiment_list)
+
     s = sub.add_parser("synth", help="write a synthetic day to try the commands")
     s.add_argument("out", help="data root, e.g. /tmp/synth")
     s.add_argument("--seconds", type=float, default=600.0)
@@ -227,6 +340,13 @@ def main(argv: list[str] | None = None) -> int:
     except ContractError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
+    except Exception as e:
+        from .experiment import ExperimentError
+
+        if isinstance(e, ExperimentError):
+            print(f"error: {e}", file=sys.stderr)
+            return 2
+        raise
 
 
 assert set(METHODS) >= FITTED
