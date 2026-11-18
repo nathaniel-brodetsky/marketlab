@@ -28,6 +28,24 @@ def _seconds(intervals: list[tuple[int, int]]) -> float:
     return sum(e - s for s, e in intervals) / SEC
 
 
+#: Quality events of a healthy day; `late` time is shown under `excluded`.
+_ROUTINE = frozenset({"connected", "disconnected", "synced", "late", "on_time"})
+
+
+def _problems(quality: dict[str, int]) -> str:
+    """The day's quality events other than routine ones, most frequent first."""
+    found = sorted(
+        ((n, k) for k, n in quality.items() if k not in _ROUTINE and n), key=lambda x: (-x[0], x[1])
+    )
+    text = ", ".join(f"{n} {k}" for n, k in found) or "none"
+    if quality.get("undecodable"):
+        text += (
+            "; undecodable messages are missing from the tables and break the book: "
+            "`marketrec verify` names the first"
+        )
+    return text
+
+
 def cmd_day(a: argparse.Namespace) -> int:
     day = Day.open(a.day, include_late=a.late)
     print(f"day         {a.day}")
@@ -57,6 +75,8 @@ def cmd_day(a: argparse.Namespace) -> int:
     )
     print(f"rows        {rows}")
     manifest = read_manifest(Path(a.day))
+    if manifest is not None:
+        print(f"problems    {_problems(manifest.quality)}")
     if manifest is not None and manifest.raw.get("covered_ns"):
         # time with a stream connection open: not the hours between two runs
         covered = manifest.raw["covered_ns"] / SEC
@@ -190,6 +210,9 @@ def print_report(r) -> None:
     days = [d.date for d in r.days]
     span = f"{days[0]} .. {days[-1]}" if days else "none"
     print(f"days        {len(days)}, {span}; held out: {', '.join(r.spec.holdout) or 'none'}")
+    if r.skipped:
+        short = ", ".join(f"{d.date} {d.usable_hours:.1f} h" for d in r.skipped)
+        print(f"skipped     under {r.spec.min_hours:g} usable hours: {short}")
     if r.verdict == "insufficient data":
         print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
         return

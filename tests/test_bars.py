@@ -9,7 +9,7 @@ from marketlab.io import Run
 S = 1_000_000_000
 
 
-def trades_day(qty, gap=None):
+def trades_day(qty, gap=None, qty_step="1"):
     """One trade a second from 1 s on, with best prices around them."""
     trades = [((i + 1) * S, 0, 0, i + 1, 100, q, i % 2 == 0) for i, q in enumerate(qty)]
     tickers = [((i + 1) * S - 1, i + 1, 99 + i % 3, 1, 101 + i % 3, 1) for i in range(len(qty))]
@@ -17,7 +17,8 @@ def trades_day(qty, gap=None):
     if gap:
         quality += [(gap[0], "gap", ""), (gap[1], "resync", "")]
     frames = synth.tables(trades=trades, book_ticker=tickers, quality=quality)
-    return synth.memory_day(frames, runs=[Run("t", 0, (len(qty) + 1) * S, None)])
+    runs = [Run("t", 0, (len(qty) + 1) * S, None)]
+    return synth.memory_day(frames, qty_step=qty_step, runs=runs)
 
 
 def test_volume_bars_close_at_the_trade_that_reaches_the_threshold():
@@ -99,3 +100,11 @@ def test_bad_arguments():
         bars.activity_bars(day, "seconds", 3)
     with pytest.raises(ValueError):
         bars.activity_bars(day, "tick", 0)
+
+
+def test_days_with_different_steps_are_not_calibrated_together():
+    a = trades_day([3, 25, 4, 10, 2])
+    finer = trades_day([30, 250, 40, 100, 20], qty_step="0.1")  # the same trades
+    with pytest.raises(ValueError, match="different steps"):
+        bars.calibrate([a, finer], 3600)
+    assert bars.calibrate([a, a], 3600).volume > 0

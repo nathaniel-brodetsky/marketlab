@@ -208,7 +208,12 @@ def _search(segments: list[list[int]], target: float) -> int:
 def calibrate(days: list[Day], bars_per_hour: float) -> Thresholds:
     """Thresholds that give about `bars_per_hour` bars of each kind per hour of valid data
     on these days, found by counting the bars they make. Fit them on training days when the
-    bars feed a model."""
+    bars feed a model. The thresholds are in steps, so the days must share their steps: a
+    day imported with a finer quantity step would count each unit many times over."""
+    steps = {(d.price_step, d.qty_step) for d in days}
+    if len(steps) > 1:
+        shown = ", ".join(f"{p.normalize():f} and {q.normalize():f}" for p, q in sorted(steps))
+        raise ValueError(f"the days have different steps ({shown}): calibrate them apart")
     counts, qty, notional = [], [], []
     seconds = 0.0
     for d in days:

@@ -28,6 +28,18 @@ def find_days(root: str | Path, symbol: str) -> list[Path]:
     return sorted(p for p in base.iterdir() if (p / "manifest.json").is_file())
 
 
+def survey(root: str | Path, symbol: str, exclude: Sequence[str] = ()) -> list[DayInfo]:
+    """Every finished day with its usable hours, by date, leaving out the dates in
+    `exclude`."""
+    out = []
+    for p in find_days(root, symbol):
+        if p.name in exclude or read_manifest(p) is None:
+            continue
+        hours = sum(e - s for s, e in Day.open(p).intervals) / NS_PER_HOUR
+        out.append(DayInfo(p, p.name, hours))
+    return out
+
+
 def select_days(
     root: str | Path,
     symbol: str,
@@ -36,11 +48,4 @@ def select_days(
 ) -> list[DayInfo]:
     """The days with at least `min_hours` of usable data, by date, leaving out the dates in
     `exclude`."""
-    out = []
-    for p in find_days(root, symbol):
-        if p.name in exclude or read_manifest(p) is None:
-            continue
-        hours = sum(e - s for s, e in Day.open(p).intervals) / NS_PER_HOUR
-        if hours >= min_hours:
-            out.append(DayInfo(p, p.name, hours))
-    return out
+    return [d for d in survey(root, symbol, exclude) if d.usable_hours >= min_hours]

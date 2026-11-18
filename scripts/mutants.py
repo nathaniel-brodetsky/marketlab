@@ -342,8 +342,8 @@ M = [
     ),
     (
         "marketlab/experiment.py",
-        "    infos = select_days(data_root, spec.symbol, spec.min_hours, exclude=spec.holdout)",
-        "    infos = select_days(data_root, spec.symbol, spec.min_hours)",
+        "    every = survey(data_root, spec.symbol, exclude=spec.holdout)",
+        "    every = survey(data_root, spec.symbol)",
         "held-out days used in the run",
     ),
     (
@@ -363,6 +363,36 @@ M = [
         "    return min((lo, hi), key=lambda t: abs(_count(segments, t) - target))",
         "    return max(1, round(total / target))",
         "thresholds from totals, not counts",
+    ),
+    (
+        "marketlab/experiment.py",
+        "    infos = [d for d in every if d.usable_hours >= spec.min_hours]",
+        "    infos = every",
+        "days short of usable hours used",
+    ),
+    (
+        "marketlab/experiment.py",
+        "    skipped = [d for d in every if d.usable_hours < spec.min_hours]",
+        "    skipped = []",
+        "skipped days not named",
+    ),
+    (
+        "marketlab/experiment.py",
+        "    dev = [d for d in every if d.usable_hours >= spec.min_hours and d.date not in spec.holdout]",
+        "    dev = [d for d in every if d.usable_hours >= spec.min_hours]",
+        "held-out days trained on by final",
+    ),
+    (
+        "marketlab/bars/__init__.py",
+        "    if len(steps) > 1:",
+        "    if False:",
+        "bars calibrated across different steps",
+    ),
+    (
+        "marketlab/cli.py",
+        "((n, k) for k, n in quality.items() if k not in _ROUTINE and n)",
+        "((n, k) for k, n in quality.items() if n)",
+        "routine events reported as problems",
     ),
 ]
 survived = []

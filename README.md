@@ -35,6 +35,7 @@ day         /tmp/synth/binance/BTCUSDT/2026-11-21
 symbol      BTCUSDT, price step 0.01, qty step 0.00001, feed json
 run         synthetic, 10:00:00-10:10:00 UTC, book synced after the start, derivation 1
 rows        depth_diff 23308, book_ticker 9671, trades 3647, book_l20 5892, quality 7
+problems    1 gap, 1 resync
 usable      592.0 s of 600.0 s from the first row to the last (98.67%), in 3 segments
 excluded    5.0 s without a valid book, 3.0 s late
 longest     237.0 s from 10:06:03 UTC
@@ -42,7 +43,7 @@ longest     237.0 s from 10:06:03 UTC
 
 | command | what it does |
 |---------|--------------|
-| `marketlab day DIR` | runs, rows, how much of the time with a connection open is usable, in how many segments, and what was left out |
+| `marketlab day DIR` | runs, rows, the quality events that are not routine (gaps, undecodable messages, overflows), how much of the time with a connection open is usable, in how many segments, and what was left out |
 | `marketlab bars DIR [--every 1s]` | time bars against tick, volume and dollar bars: return distribution and dependence |
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
@@ -216,7 +217,9 @@ be compared with each other.
 The metric for a forecast of returns is the rank IC by day, with Newey-West standard errors
 because samples overlap when the horizon is longer than their spacing; days are taken as
 independent. Each run ends in `results/NNN-name.json` with one of three verdicts:
-`passed`, `failed`, `insufficient data`, and the reasons.
+`passed`, `failed`, `insufficient data`, and the reasons. Days with fewer usable hours than
+the hypothesis asks are left out and named, with their hours, so that a short sample has a
+visible cause.
 
 `tests/test_validation.py` checks each statistic against an answer worked out in advance:
 purging and embargo sample by sample, the CPCV paths, Newey-West against the plain error,

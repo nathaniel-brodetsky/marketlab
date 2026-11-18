@@ -162,6 +162,15 @@ def test_the_day_command_counts_time_with_a_connection_open(capsys):
     # the manifest's covered time, not the run's span: 0.230 s + 0.175 s of 1.405 s
     assert "of 0.4 s with a connection open" in out
     assert "in 2 segments" in out
+    assert "problems    1 reconnect\n" in out
+
+
+def test_problems_are_the_events_of_a_day_that_is_not_well():
+    from marketlab.cli import _problems
+
+    assert _problems({"connected": 1, "synced": 1, "late": 3, "on_time": 3}) == "none"
+    text = _problems({"synced": 1, "gap": 1, "undecodable": 830, "buffer_overflow": 85})
+    assert text.startswith("830 undecodable, 85 buffer_overflow, 1 gap; undecodable messages")
 
 
 @pytest.mark.parametrize("name", ["short", "gap", "reconnect"])

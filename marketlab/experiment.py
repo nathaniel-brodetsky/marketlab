@@ -42,7 +42,7 @@ from . import __version__
 from .features import MultiLevelOFI, Volatility, duration_ns, grid
 from .features.ofi import mid_change
 from .io.day import Day
-from .io.days import DayInfo, select_days
+from .io.days import DayInfo, survey
 from .targets import returns_on
 from .validation import metrics, pbo, splits, surrogates
 from .validation.multiple import benjamini_hochberg
@@ -346,6 +346,8 @@ class Report:
     p_bh: float
     verdict: str
     reasons: list[str]
+    #: Days left out for having fewer usable hours than the hypothesis asks.
+    skipped: list[DayInfo] = field(default_factory=list)
 
     def to_json(self) -> dict:
         s = self.spec
@@ -364,6 +366,9 @@ class Report:
                 "symbol": s.symbol,
                 "days": [
                     {"date": d.date, "usable_hours": round(d.usable_hours, 3)} for d in self.days
+                ],
+                "skipped": [
+                    {"date": d.date, "usable_hours": round(d.usable_hours, 3)} for d in self.skipped
                 ],
                 "holdout": list(s.holdout),
             },
@@ -410,7 +415,9 @@ def run(
     workers: int = 1,
 ) -> Report:
     prov = prov or provenance(spec.path)
-    infos = select_days(data_root, spec.symbol, spec.min_hours, exclude=spec.holdout)
+    every = survey(data_root, spec.symbol, exclude=spec.holdout)
+    infos = [d for d in every if d.usable_hours >= spec.min_hours]
+    skipped = [d for d in every if d.usable_hours < spec.min_hours]
     lags = max(1, ceil(duration_ns(spec.horizon) / duration_ns(spec.sampling)))
     nan = float("nan")
     needed = max(spec.min_days, spec.folds, spec.cpcv_test_groups + 1)
@@ -435,6 +442,7 @@ def run(
             nan,
             "insufficient data",
             [reason],
+            skipped,
         )
         return _finish(report, results)
     s = Samples([load_inputs(i, spec, cache) for i in infos])
@@ -497,6 +505,7 @@ def run(
         p_bh,
         verdict,
         reasons,
+        skipped,
     )
     return _finish(report, results)
 
@@ -704,10 +713,9 @@ def final(
     if not (results / f"{spec.slug}.json").exists():
         raise ExperimentError(f"run {spec.slug} on the development days first")
     prov = prov or provenance(spec.path)
-    dev = select_days(data_root, spec.symbol, spec.min_hours, exclude=spec.holdout)
-    held = [
-        d for d in select_days(data_root, spec.symbol, spec.min_hours) if d.date in spec.holdout
-    ]
+    every = survey(data_root, spec.symbol)
+    dev = [d for d in every if d.usable_hours >= spec.min_hours and d.date not in spec.holdout]
+    held = [d for d in every if d.usable_hours >= spec.min_hours and d.date in spec.holdout]
     if not held:
         raise ExperimentError("none of the held-out days is in the data")
     lags = max(1, ceil(duration_ns(spec.horizon) / duration_ns(spec.sampling)))

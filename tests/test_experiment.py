@@ -64,13 +64,16 @@ def fake_days(n, signal, seed=0, rows=600):
 
 @pytest.fixture
 def planted(monkeypatch):
-    def use(frames):
-        infos = [DayInfo(Path("/nowhere") / d, d, 24.0) for d in sorted(frames)]
+    def use(frames, short=()):
+        """`short`: dates with less usable time than the hypothesis asks."""
+        infos = [
+            DayInfo(Path("/nowhere") / d, d, 0.001 if d in short else 24.0) for d in sorted(frames)
+        ]
 
-        def select(root, symbol, min_hours, exclude=()):
+        def survey(root, symbol, exclude=()):
             return [i for i in infos if i.date not in exclude]
 
-        monkeypatch.setattr(ex, "select_days", select)
+        monkeypatch.setattr(ex, "survey", survey)
         monkeypatch.setattr(ex, "load_inputs", lambda info, spec, cache: frames[info.date])
 
     return use
@@ -109,6 +112,22 @@ def test_too_few_days_is_insufficient_data(tmp_path, planted):
     )
 
 
+def test_days_short_of_usable_hours_are_named(tmp_path, planted, capsys):
+    planted(fake_days(10, signal=0.3), short={"2026-01-03", "2026-01-07"})
+    r = ex.run(ex.load_spec(spec_file(tmp_path)), "unused", tmp_path / "results", prov=PROV)
+    assert [d.date for d in r.days] == [f"2026-01-{d:02d}" for d in (1, 2, 4, 5, 6, 8, 9, 10)], (
+        "the short days take no part"
+    )
+    assert [d.date for d in r.skipped] == ["2026-01-03", "2026-01-07"]
+    j = json.loads((tmp_path / "results" / "007-planted.json").read_text())
+    assert [d["date"] for d in j["data"]["skipped"]] == ["2026-01-03", "2026-01-07"]
+    from marketlab.cli import print_report
+
+    print_report(r)
+    out = capsys.readouterr().out
+    assert "skipped     under 0.01 usable hours: 2026-01-03 0.0 h, 2026-01-07 0.0 h" in out
+
+
 def test_the_registry_adjusts_every_hypothesis_together(tmp_path, planted):
     planted(fake_days(10, signal=0.3))
     results = tmp_path / "results"
@@ -131,7 +150,7 @@ def test_surrogates_do_not_depend_on_the_number_of_workers(tmp_path, planted):
     assert one.surrogate == two.surrogate
 
 
-def test_the_held_out_days_open_once(tmp_path, planted):
+def test_the_held_out_days_open_once(tmp_path, planted, monkeypatch):
     planted(fake_days(10, signal=0.3) | {"2026-01-30": fake_days(1, 0.3, seed=9)["2026-01-01"]})
     spec = ex.load_spec(spec_file(tmp_path))
     results = tmp_path / "results"
@@ -139,8 +158,12 @@ def test_the_held_out_days_open_once(tmp_path, planted):
         ex.final(spec, "unused", results, prov=PROV)
     r = ex.run(spec, "unused", results, prov=PROV)
     assert "2026-01-30" not in [d.date for d in r.days]
+    loaded = []
+    load = ex.load_inputs
+    monkeypatch.setattr(ex, "load_inputs", lambda i, s, c: loaded.append(i.date) or load(i, s, c))
     rec = ex.final(spec, "unused", results, prov=PROV)
     assert rec["days"] == ["2026-01-30"]
+    assert loaded == [d.date for d in r.days] + ["2026-01-30"], "fit on the others, scored on it"
     assert rec["summary"]["mean"] > 0.1
     with pytest.raises(ex.ExperimentError, match="opened already"):
         ex.final(spec, "unused", results, prov=PROV)
