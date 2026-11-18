@@ -56,8 +56,10 @@ class VPIN(Method):
     known when the last of them fills. Buckets start again in each segment.
 
     `fit` sets V from the training days: their volume per hour of valid data, scaled to a
-    day, divided by `buckets_per_day`. The aggressor's side is exact here, so no bulk
-    classification is needed.
+    day, divided by `buckets_per_day`. The default 1000 buckets a day over 50 gives a value
+    about an hour into a segment; the paper's 50 over 50 needs a day of unbroken data, and
+    on a quieter day than the training ones gives none at all. The aggressor's side is
+    exact here, so no bulk classification is needed.
 
     No presumption that it predicts anything: Andersen and Bondarenko found its forecasting
     power for volatility comes from its link to volume. It goes through the same tests as
@@ -66,7 +68,7 @@ class VPIN(Method):
 
     name = "vpin"
 
-    def __init__(self, buckets_per_day: int = 50, window: int = 50):
+    def __init__(self, buckets_per_day: int = 1000, window: int = 50):
         self.buckets_per_day = buckets_per_day
         self.window = window
         self.bucket_: int | None = None

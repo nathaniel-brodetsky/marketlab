@@ -326,7 +326,9 @@ def test_every_method_reports_on_the_grid(train_day, test_day):
     assert set(METHODS) == {m.name for m in methods}
     # every column has values somewhere
     empty = [c for c in table.columns if table[c].null_count() == table.height]
-    assert empty == ["vpin"]  # 50 buckets of 1/50 of a day need a day: not in 5 minutes
+    # VPIN needs 50 buckets of 1/1000 of a day, more than 5 minutes; and the synthetic book's
+    # 20 levels lie one tick apart, so they never reach 0.1 bp: the depth there is unknown
+    assert sorted(empty) == ["depth_0p1bp", "depth_0p25bp", "vpin"]
 
 
 def test_vpin_with_short_buckets_on_synthetic_data(train_day, test_day):

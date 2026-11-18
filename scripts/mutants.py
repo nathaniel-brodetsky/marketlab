@@ -155,8 +155,8 @@ M = [
     ),
     (
         "marketlab/bars/__init__.py",
-        "        if total >= threshold:",
-        "        if total > threshold:",
+        "        out[i] = k\n        total += x\n        if total >= threshold:",
+        "        out[i] = k\n        total += x\n        if total > threshold:",
         "bar closes late",
     ),
     ("marketlab/bars/__init__.py", "    out[out == k] = -1", "    pass", "unfinished bar kept"),
@@ -357,6 +357,12 @@ M = [
         '        cols[f"ret_{h}"] = np.where(inside, r, np.nan)',
         '        cols[f"ret_{h}"] = r',
         "returns across a hole",
+    ),
+    (
+        "marketlab/bars/__init__.py",
+        "    return min((lo, hi), key=lambda t: abs(_count(segments, t) - target))",
+        "    return max(1, round(total / target))",
+        "thresholds from totals, not counts",
     ),
 ]
 survived = []

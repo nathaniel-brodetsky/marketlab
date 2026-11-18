@@ -173,24 +173,58 @@ class Thresholds:
     dollar: int  # price step x quantity step
 
 
+def _count(segments: list[list[int]], threshold: int) -> int:
+    """Finished bars at this threshold, as `activity_bars` closes them."""
+    n = 0
+    for measure in segments:
+        total = 0
+        for x in measure:
+            total += x
+            if total >= threshold:
+                n += 1
+                total = 0
+    return n
+
+
+def _search(segments: list[list[int]], target: float) -> int:
+    """The threshold whose number of bars comes closest to `target`. A trade that passes the
+    threshold closes its bar with the excess, so total / target gives too few bars when
+    trades are large; the threshold is searched for instead, between that and a value low
+    enough to give too many, until the two are within 0.1 % of each other."""
+    total = sum(sum(m) for m in segments)
+    hi = max(1, round(total / target))
+    lo = hi
+    while lo > 1 and _count(segments, lo) < target:
+        lo = max(1, lo // 2)
+    while hi > lo + 1 and hi > lo * 1.001:
+        mid = max(lo + 1, min(hi - 1, round((lo * hi) ** 0.5)))
+        if _count(segments, mid) >= target:
+            lo = mid
+        else:
+            hi = mid
+    return min((lo, hi), key=lambda t: abs(_count(segments, t) - target))
+
+
 def calibrate(days: list[Day], bars_per_hour: float) -> Thresholds:
     """Thresholds that give about `bars_per_hour` bars of each kind per hour of valid data
-    on these days. Fit them on training days when the bars feed a model."""
-    trades = volume = notional = 0
+    on these days, found by counting the bars they make. Fit them on training days when the
+    bars feed a model."""
+    counts, qty, notional = [], [], []
     seconds = 0.0
     for d in days:
         t = _trades(d)
-        trades += t.height
-        volume += int(t["qty"].sum()) if t.height else 0
-        notional += int(t["notional"].sum()) if t.height else 0
+        for _, part in t.group_by("segment", maintain_order=True):
+            counts.append(part.height)
+            qty.append(part["qty"].to_list())
+            notional.append(part["notional"].to_list())
         seconds += sum(e - s for s, e in d.intervals) / 1e9
     bars = bars_per_hour * seconds / 3600
-    if bars <= 0 or trades == 0:
+    if bars <= 0 or sum(counts) == 0:
         raise ValueError("no trades in valid data")
     return Thresholds(
-        tick=max(1, round(trades / bars)),
-        volume=max(1, round(volume / bars)),
-        dollar=max(1, round(notional / bars)),
+        tick=max(1, round(sum(counts) / bars)),
+        volume=_search(qty, bars),
+        dollar=_search(notional, bars),
     )
 
 

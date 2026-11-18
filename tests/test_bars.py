@@ -78,6 +78,21 @@ def test_calibrated_bars_come_in_similar_numbers(test_day):
     assert max(n) / min(n) < 1.2
 
 
+def test_calibration_counts_the_bars_when_trades_overshoot():
+    # heavy-tailed sizes: a big trade passes the threshold by far and the excess is lost, so
+    # total / target would give far fewer volume bars than asked for
+    rng = np.random.default_rng(11)
+    qty = np.minimum((rng.pareto(1.2, 4000) + 1) * 10, 50_000).astype(int).tolist()
+    day = trades_day(qty)
+    th = bars.calibrate([day], bars_per_hour=1800)  # one bar every two seconds
+    target = 1800 * sum(e - s for s, e in day.intervals) / 1e9 / 3600
+    for kind in ("volume", "dollar"):
+        n = bars.activity_bars(day, kind, getattr(th, kind)).height
+        assert abs(n - target) <= 0.02 * target, (kind, n, target)
+    naive = sum(qty) / target
+    assert bars.activity_bars(day, "volume", round(naive)).height < 0.8 * target
+
+
 def test_bad_arguments():
     day = trades_day([1, 2])
     with pytest.raises(ValueError):

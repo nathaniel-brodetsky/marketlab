@@ -36,7 +36,7 @@ class BookShape(Method):
     name = "book"
 
     def __init__(
-        self, levels: Sequence[int] = (1, 5, 20), bands_bps: Sequence[float] = (0.01, 0.02)
+        self, levels: Sequence[int] = (1, 5, 20), bands_bps: Sequence[float] = (0.1, 0.25)
     ):
         self.levels = tuple(levels)
         self.bands_bps = tuple(bands_bps)

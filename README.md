@@ -109,9 +109,12 @@ is read from its parts, with the book taken as unknown until the first `synced`.
 A bar's price is the mid at its close from the best bid and ask, not the last trade, so the
 bounce between bid and ask is not counted as a return. `marketlab bars` compares the types
 on a day: standard deviation, skew, excess kurtosis, Jarque-Bera, first autocorrelation,
-Ljung-Box over 10 lags and the share of zero returns, with activity thresholds set to give
-about as many bars as the time bars. The claim that activity bars give returns closer to
-normal and less dependent is to be measured on recorded days, not assumed.
+Ljung-Box over 10 lags and the share of zero returns, with activity thresholds found by
+counting the bars they make, so that each kind gives as many bars as the time bars. (Total
+volume divided by the number wanted gives too few: a large trade passes the threshold by
+far and its excess leaves with it. On a recorded day that halved the volume bars.) The
+claim that activity bars give returns closer to normal and less dependent is to be
+measured on recorded days, not assumed.
 
 ## Features (layer 1)
 
@@ -120,7 +123,7 @@ All features are reported on one grid: the `book_l20` rows inside segments, abou
 
 | method | columns | from | notes |
 |--------|---------|------|-------|
-| `book` | `mid`, `spread_ticks`, `spread_bps`, `wmid_dev_bps`, `imb_1/5/20`, `depth_<x>bp`, `reach_bid_bps`, `reach_ask_bps` | `book_l20` | depth within x bp is null where the 20 recorded levels do not reach that far; `reach_*` says how far they do |
+| `book` | `mid`, `spread_ticks`, `spread_bps`, `wmid_dev_bps`, `imb_1/5/20`, `depth_<x>bp`, `reach_bid_bps`, `reach_ask_bps` | `book_l20` | depth within x bp (0.1 and 0.25 by default) is null where the 20 recorded levels do not reach that far; `reach_*` says how far they do: a median of 0.5 bp for BTCUSDT on 2026-11-01 |
 | `ofi` | `ofi_<w>` | `book_ticker` | order-flow imbalance at the best level, Cont, Kukanov, Stoikov (2014), from every best-price update |
 | `mlofi` | `ofi_l<m>_<w>`, `mlofi_<w>` | `book_l20` | per-level OFI and their combination with least-squares weights fitted on training days, Xu, Gould, Howison (2019) |
 | `trades` | `trade_imb_<w>`, `volume_<w>` | `trades` | aggressive buying minus selling; the aggressor's side is exact |
@@ -253,12 +256,23 @@ counted twice, a probe that prices from 300 ms ahead, a markout across a hole, a
 and runs the tests on each: all 45 are caught. For the protocol it adds 13 more: no purging,
 no embargo, every CPCV path through the same split, Newey-West without its lags, the IC on
 values instead of ranks, the held-out days used in the run, a shift surrogate that does not
-shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg, and others.
+shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg, and others;
+and one for the bars, thresholds taken from totals instead of counted: 59 in all, all
+caught.
 
 ## Numbers
 
-None yet. Measured numbers go here once a full recorded day is in: `marketlab day`, `bars`
-and `features` on it, with the machine and the date.
+A day of Tardis.dev's recording of BTCUSDT (2026-11-01, imported with `marketrec import
+tardis`: 10.2 million depth rows, 3.4 million best bid and ask updates, 1.1 million trades,
+0.86 million book rows), on the author's laptop (Fedora, 32 threads), 2026-11-18:
+
+| command | wall time |
+|---------|-----------|
+| `marketlab day DIR` | 2.0 s |
+| `marketlab features DIR --train DIR` (every feature, fitted ones trained on 2026-10-01) | 16.0 s |
+| `marketlab execution DIR --latency 300ms --aggressive` (17,278 orders in each of the three queue modes, and market orders) | 51.3 s |
+
+Results of hypotheses are not here but in `results/`, written by the protocol.
 
 `python scripts/timing.py` gives a rough size of the work: a synthetic hour with the rates
 of a recorded BTCUSDT hour (about 436 thousand best-price updates, 165 thousand trades,
@@ -275,8 +289,9 @@ plus market orders) 3.2 s. The market there is a toy, so this is not a result.
 - **Cancel share is an estimate.** Aggregated L2 data cannot tell a cancel from a fill;
   fills are taken from trades at the level's price, and a level that leaves the top 20
   without crossing the best price may only have been pushed down, so it is not counted.
-- **VPIN** with the canonical 50 buckets a day over 50 buckets needs a day of unbroken
-  data before its first value; `VPIN(buckets_per_day=..., window=...)` sets shorter ones.
+- **VPIN** uses 1000 buckets a day over 50 by default, so its first value comes about an
+  hour into a segment. The paper's 50 over 50 needs a day of unbroken data, and on a
+  quieter day than the training ones gives none: so it was on 2026-11-01.
   It goes through the same tests as any feature: Andersen and Bondarenko found its
   forecasting power for volatility comes from its link to volume.
 - **Days are read one at a time.** A segment ends at midnight even when the recording goes
