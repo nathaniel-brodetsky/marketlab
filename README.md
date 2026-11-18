@@ -280,7 +280,11 @@ minus without it, by day; with no fitted part the days are scored directly. Cont
 signal rolled within its day by at least ten minutes (same withdrawals, wrong times), PBO
 over the variants, Benjamini-Hochberg over the registry, the pessimistic queue for the
 verdict and the other two for sensitivity. The report gives the mean markout with the rule
-as the maker fee at which it breaks even. `experiments/002-maker-ofi-pull.yaml` is the
+as the maker fee at which it breaks even. A day goes through the simulator an hour at a
+time, with a minute of data before each hour and as much after as an order's cancel,
+latency and longest markout reach: a busy day's 50 million depth updates do not fit in
+memory four times over, an hour's do, and every order sees what it sees in the whole day
+(the tests compare the two). `experiments/002-maker-ofi-pull.yaml` is the
 first: level-1 OFI of the last second, scaled by its spread over the hour before, beyond
 one unit against the order, 10-second markouts, the same held-out days as 001.
 

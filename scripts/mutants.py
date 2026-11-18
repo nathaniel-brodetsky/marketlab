@@ -514,6 +514,18 @@ M = [
         "    p = float(stats.t.cdf(mean / se, ok.sum() - 1)) if se > 0 else (0.0 if mean > 0 else 1.0)",
         "p from the wrong tail",
     ),
+    (
+        "marketlab/maker.py",
+        "BEFORE = 60 * 1_000_000_000",
+        "BEFORE = 0",
+        "a piece read from its first decision, without the book before it",
+    ),
+    (
+        "marketlab/maker.py",
+        "                if lo <= o.decided < hi",
+        "                if lo <= o.decided <= hi",
+        "an order decided at a piece's end simulated twice",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

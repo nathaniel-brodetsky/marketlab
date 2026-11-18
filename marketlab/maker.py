@@ -28,7 +28,7 @@ from __future__ import annotations
 import datetime as dt
 import hashlib
 from collections.abc import Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from decimal import Decimal
 from pathlib import Path
 
@@ -45,7 +45,7 @@ from .io.day import Day
 from .io.days import DayInfo, survey
 from .validation import pbo
 
-CACHE_VERSION = 1
+CACHE_VERSION = 2
 HORIZONS = ("100ms", "1s", "10s", "60s")
 NS_HOUR = 3_600_000_000_000
 
@@ -206,24 +206,79 @@ class DayInputs:
     signal: pl.DataFrame
 
 
-def day_inputs(day: Day, spec: Spec) -> DayInputs:
-    m = Market.of(day)
-    qty = int(spec.size / day.qty_step)
-    if qty < 1 or Decimal(qty) * day.qty_step != spec.size:
-        raise ex.ExperimentError(f"{day.date}: size {spec.size} is not whole quantity steps")
-    orders = probe_orders(m, spec.every, qty, spec.cancel_after)
+#: Simulated an hour at a time: a whole busy day's depth updates (some 50 million) are
+#: several GB, an hour's a few hundred MB.
+CHUNK = "1h"
+#: Data read before a piece: the best prices and the book its first decisions need.
+BEFORE = 60 * 1_000_000_000
+
+
+def simulate_day(
+    path: Path, spec: Spec, chunk: str | None = CHUNK
+) -> tuple[pl.DataFrame, pl.DataFrame]:
+    """The probe orders of a day in every queue mode: (orders of `spec.queue`, fills with
+    markouts). With `chunk`, the day goes through the simulator a piece at a time: the
+    orders decided in a piece, with the data from `BEFORE` ahead of it to as far as their
+    cancel, latency and longest markout reach. An order sees exactly what it sees in the
+    whole day (`tests/test_maker.py` compares the two), in a fraction of the memory."""
+    whole = Day.open(path)
+    qty = int(spec.size / whole.qty_step)
+    if qty < 1 or Decimal(qty) * whole.qty_step != spec.size:
+        raise ex.ExperimentError(f"{whole.date}: size {spec.size} is not whole quantity steps")
     lat = duration_ns(spec.latency)
-    fill_frames, order_frame = [], None
-    for mode in Mode:
-        o, f = frames(simulate(m, orders, lat, mode), mode)
-        fill_frames.append(f)
-        if mode == spec.queue:
-            order_frame = o
-    fills = markouts(m, pl.concat(fill_frames), HORIZONS)
+    reach = duration_ns(spec.cancel_after) + lat + max(duration_ns(h) for h in HORIZONS)
+    if chunk is None:
+        pieces = [(None, None)]
+    else:
+        step = duration_ns(chunk)
+        first = min(r.first_recv_ts for r in whole.runs)
+        last = max(r.last_recv_ts for r in whole.runs)
+        pieces = [(lo, lo + step) for lo in range(first // step * step, last + 1, step)]
+    order_frames, fill_frames, next_id = [], [], 0
+    for lo, hi in pieces:
+        if lo is None:
+            m = Market.of(whole)
+            orders = probe_orders(m, spec.every, qty, spec.cancel_after)
+        else:
+            m = Market.of(Day.open(path, between=(lo - BEFORE, hi + reach + 1_000_000_000)))
+            orders = [
+                o
+                for o in probe_orders(m, spec.every, qty, spec.cancel_after)
+                if lo <= o.decided < hi
+            ]
+        orders = [replace(o, id=next_id + k) for k, o in enumerate(orders)]
+        next_id += len(orders)
+        if not orders:
+            continue
+        piece = []
+        for mode in Mode:
+            o, f = frames(simulate(m, orders, lat, mode), mode)
+            piece.append(f)
+            if mode == spec.queue:
+                order_frames.append(o)
+        fill_frames.append(markouts(m, pl.concat(piece), HORIZONS))
+    cols = ("mode", "id", "side", "ts", "qty", *(f"markout_{h}" for h in HORIZONS))
+    orders = (
+        pl.concat(order_frames).select("id", "side", "decided", "outcome", "filled", "qty")
+        if order_frames
+        else pl.DataFrame(schema={"id": pl.Int64, "side": pl.Int8, "decided": pl.Int64,
+                                  "outcome": pl.String, "filled": pl.Int64, "qty": pl.Int64})
+    )  # fmt: skip
+    fills = pl.concat(fill_frames).select(cols) if fill_frames else None
+    if fills is None:
+        fills = pl.DataFrame(
+            schema={"mode": pl.String, "id": pl.Int64, "side": pl.Int8, "ts": pl.Int64,
+                    "qty": pl.Int64, **{f"markout_{h}": pl.Float64 for h in HORIZONS}}
+        )  # fmt: skip
+    return orders, fills
+
+
+def day_inputs(path: Path, spec: Spec) -> DayInputs:
+    orders, fills = simulate_day(path, spec)
     return DayInputs(
-        orders=order_frame.select("id", "side", "decided", "outcome", "filled", "qty"),
-        fills=fills.select("mode", "id", "side", "ts", "qty", *(f"markout_{h}" for h in HORIZONS)),
-        signal=signal(day, sorted({v.window for v in spec.variants})),
+        orders=orders.sort("id"),
+        fills=fills,
+        signal=signal(Day.open(path), sorted({v.window for v in spec.variants})),
     )
 
 
@@ -249,8 +304,7 @@ def load_inputs(info: DayInfo, spec: Spec, cache: Path | None) -> DayInputs:
         d = _cache_dir(cache, info, spec)
         if all((d / f"{n}.parquet").exists() for n in names):
             return DayInputs(*(pl.read_parquet(d / f"{n}.parquet") for n in names))
-    x = day_inputs(Day.open(info.path), spec)
-    x.orders = x.orders.sort("id")
+    x = day_inputs(info.path, spec)
     if cache is not None:
         d.mkdir(parents=True, exist_ok=True)
         for n in names:
@@ -273,8 +327,16 @@ def load_all(infos: Sequence[DayInfo], spec: Spec, cache: Path | None, workers: 
 
     methods = multiprocessing.get_all_start_methods()
     context = multiprocessing.get_context("forkserver" if "forkserver" in methods else "spawn")
-    with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
-        return list(pool.map(_load_one, tasks))
+    from concurrent.futures.process import BrokenProcessPool
+
+    try:
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context) as pool:
+            return list(pool.map(_load_one, tasks))
+    except BrokenProcessPool as e:
+        raise ex.ExperimentError(
+            f"a worker was stopped from outside, most likely for want of memory: run again "
+            f"with fewer --workers than {workers} (days already done are cached)"
+        ) from e
 
 
 # --- the rule ----------------------------------------------------------------------------

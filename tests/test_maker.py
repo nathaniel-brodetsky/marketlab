@@ -285,3 +285,16 @@ def test_end_to_end_on_synthetic_days(tmp_path):
     assert again.mean_delta == r.mean_delta, "from the cache, the same numbers"
     rec = maker.final(spec, data, tmp_path / "results", cache=tmp_path / ".cache")
     assert rec["days"] == ["2026-11-25"]
+
+
+def test_a_day_simulated_in_pieces_equals_the_whole_day(day, tmp_path):
+    # pieces of two minutes cross the gap, segment ends and the day's end; every order sees
+    # what it sees in the whole day
+    spec = maker.load_spec(spec_file(tmp_path))
+    spec = maker.replace(spec, every="3s")
+    whole_o, whole_f = maker.simulate_day(day.path, spec, chunk=None)
+    part_o, part_f = maker.simulate_day(day.path, spec, chunk="2m")
+    assert len(whole_o) > 300 and len(whole_f) > 100
+    assert part_o.equals(whole_o)
+    key = ["mode", "id", "ts"]
+    assert part_f.sort(key).equals(whole_f.sort(key))
