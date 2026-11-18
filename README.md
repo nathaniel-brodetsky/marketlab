@@ -53,6 +53,37 @@ longest     237.0 s from 10:06:03 UTC
 
 `--late` keeps the intervals in which the data arrived late (see below).
 
+## App
+
+```bash
+pip install -e '.[app]'
+streamlit run app/main.py                                   # data in ../marketrec/data
+streamlit run app/main.py -- --data ~/projects/marketrec/data
+```
+
+One Streamlit application with Plotly charts, in Russian. It reads the data root (the
+`--data` argument, else `MARKETLAB_DATA`, else `marketrec/data` next to this repository)
+and computes nothing heavy. It has one screen so far, the market:
+
+- a stretch of a day, 1 to 60 minutes, picked by its UTC start: the mid, the mid weighted by
+  the best levels' sizes, and trades as triangles by the side that took liquidity; the
+  book's 20 levels a side as a heat map over time; the spread; the depth of each side;
+  and, if asked, level-1 order-flow imbalance over the last second with the next second's
+  return under it;
+- a replay of 10 to 120 seconds of it, a frame every 100 ms: the book as it had arrived at
+  that moment, as bars by ticks from the mid, with the trades of the last 100 ms, next to
+  the mid with a line at the moment; play, pause and a slider, in the browser.
+
+Every chart shades in grey the time without a valid book and in orange the time the data
+was more than a second late, so that a hole never looks like a quiet market; lines break at
+holes. Long stretches are thinned to at most 1200 time bins (each shows the last book row
+in it) and 30,000 trades (the largest) before drawing. A stretch is read alone: only the
+parts and row groups that hold its minutes, plus two seconds either side, which the order
+flow of the last second and the return of the next one need (`Day.open(..., between=)`).
+The chart of order flow and returns shows what happened; whether one predicts the other is
+for the experiments, with their surrogates. The screens for data quality, latency,
+features, point processes, execution, regimes, dynamics and experiments come next.
+
 ## Architecture
 
 ```text
@@ -67,7 +98,9 @@ marketrec (Rust)                         marketlab (Python)
                                            experiments/ one YAML per hypothesis, committed first
                                            results/   one JSON per run, failures included
                                            registry   every method by name
-                                           next:      events/, app/
+                                           view/      what the app's screens show, tested
+                                           app/       the Streamlit application
+                                           next:      events/
 ```
 
 Prices and quantities stay integers (steps of the symbol) until a feature turns them into
@@ -319,7 +352,8 @@ plus market orders) 3.2 s. The market there is a toy, so this is not a result.
 
 ```bash
 pytest                     # contract, intervals, bars, features, execution, look-ahead,
-                           # validation statistics, the experiment runner
+                           # validation statistics, the experiment runner, the app's data
+                           # (and the app itself opening, with the app extra installed)
 python scripts/mutants.py  # the faults above, each must make the tests fail
 ruff check . && ruff format --check .
 ```

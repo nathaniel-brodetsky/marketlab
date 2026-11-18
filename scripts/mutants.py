@@ -394,6 +394,78 @@ M = [
         "((n, k) for k, n in quality.items() if n)",
         "routine events reported as problems",
     ),
+    (
+        "marketlab/io/contract.py",
+        '        pieces.append(pq.read_table(p, columns=cols, filters=[(t, ">=", lo), (t, "<", hi)]))',
+        '        pieces.append(pq.read_table(p, columns=cols, filters=[(t, ">=", lo)]))',
+        "a window read past its end",
+    ),
+    (
+        "marketlab/io/contract.py",
+        "        if st is None or not st.has_min_max or (st.min < hi and st.max >= lo):",
+        "        if st is None or not st.has_min_max:",
+        "parts inside a window skipped",
+    ),
+    (
+        "marketlab/io/day.py",
+        '            window = None if table == "quality" else between',
+        "            window = between",
+        "the journal cut to the window",
+    ),
+    (
+        "marketlab/view/market.py",
+        "PAD = 2 * NS  # read before the start: the last second's order flow needs it",
+        "PAD = 0",
+        "no data read before a stretch",
+    ),
+    (
+        "marketlab/view/market.py",
+        "AFTER = 2 * NS  # read after the end: the next second's return needs it",
+        "AFTER = 0",
+        "no data read after a stretch",
+    ),
+    (
+        "marketlab/view/market.py",
+        "        keep[before] = True",
+        "        pass",
+        "the book at a stretch's start unknown",
+    ),
+    (
+        "marketlab/view/market.py",
+        "        late=_minus(_clip(loose, lo, hi), strict),",
+        "        late=[],",
+        "late parts not shaded",
+    ),
+    (
+        "marketlab/view/market.py",
+        "    rows = np.where(last >= first, last, -1)",
+        "    rows = last",
+        "a bin in a hole shows the row before it",
+    ),
+    (
+        "marketlab/view/market.py",
+        "    bid = s.book.bid_qty[r][:, ::-1].T.astype(float)  # level 20 first, at the bottom",
+        "    bid = s.book.bid_qty[r].T.astype(float)",
+        "bid levels upside down in the heat map",
+    ),
+    (
+        "marketlab/view/market.py",
+        "        weighted = (bp * aq + ap * bq) / (bq + aq)",
+        "        weighted = (bp * bq + ap * aq) / (bq + aq)",
+        "weighted mid with the sizes swapped",
+    ),
+    (
+        "marketlab/view/market.py",
+        "        valid = i >= 0 and seg[k] >= 0 and b.segment[i] == seg[k]",
+        "        valid = i >= 0",
+        "a replay shows a stale book in a hole",
+    ),
+    (
+        "marketlab/view/market.py",
+        "    breaks = np.flatnonzero(seg[1:] != seg[:-1]) + 1",
+        "    breaks = np.zeros(0, dtype=np.int64)",
+        "the replay's mid bridges a hole",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

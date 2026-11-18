@@ -23,6 +23,10 @@ dev = [
     "pytest>=8",
     "ruff>=0.8",
 ]
+app = [
+    "plotly>=5.24",
+    "streamlit>=1.40",
+]
 
 [project.scripts]
 marketlab = "marketlab.cli:main"
@@ -43,3 +47,4 @@ addopts = "-q"
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/mutants.py" = ["E501"]  # each fault is one source line, quoted whole
+"app/*.py" = ["RUF001"]  # the interface speaks Russian

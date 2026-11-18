@@ -81,8 +81,16 @@ class Day:
     # construction
 
     @classmethod
-    def open(cls, path: str | Path, source: str = "json", include_late: bool = False) -> Day:
-        """A day directory `<root>/binance/<symbol>/<date>`."""
+    def open(
+        cls,
+        path: str | Path,
+        source: str = "json",
+        include_late: bool = False,
+        between: tuple[int, int] | None = None,
+    ) -> Day:
+        """A day directory `<root>/binance/<symbol>/<date>`. With `between=(lo, hi)` only the
+        rows received in `[lo, hi)` are read, except the quality journal, which is read whole
+        so that the valid intervals are those of the whole day."""
         path = Path(path)
         manifest = read_manifest(path)
         if manifest is not None:
@@ -99,7 +107,10 @@ class Day:
         day_meta = meta
 
         def load(table: str, columns: tuple[str, ...]) -> pl.DataFrame:
-            return pl.from_arrow(read_parts(path, table, list(columns), expect=day_meta))
+            window = None if table == "quality" else between
+            return pl.from_arrow(
+                read_parts(path, table, list(columns), expect=day_meta, between=window)
+            )
 
         day = cls(
             symbol=meta.symbol,

@@ -232,14 +232,33 @@ def part_meta(path: Path, table: str) -> PartMeta:
     return meta
 
 
+def _may_overlap(meta: pq.FileMetaData, column: str, between: tuple[int, int]) -> bool:
+    """Whether a part can hold rows with `column` in `[lo, hi)`, by its row groups'
+    statistics; True when they are missing."""
+    lo, hi = between
+    names = meta.schema.names
+    if column not in names:
+        return True
+    i = names.index(column)
+    for g in range(meta.num_row_groups):
+        st = meta.row_group(g).column(i).statistics
+        if st is None or not st.has_min_max or (st.min < hi and st.max >= lo):
+            return True
+    return False
+
+
 def read_parts(
     day: Path,
     table: str,
     columns: list[str] | None = None,
     expect: PartMeta | None = None,
+    between: tuple[int, int] | None = None,
 ) -> pa.Table:
     """All finished parts of a table, checked against the contract and against `expect`
-    (symbol and steps); an empty table with the contract's columns if there are none."""
+    (symbol and steps); an empty table with the contract's columns if there are none.
+    With `between=(lo, hi)`, only the rows with time in `[lo, hi)`: parts and row groups
+    outside are skipped by their statistics, so minutes of a day read in a fraction of the
+    whole."""
     schema = TABLES[table]
     cols = columns or schema.names
     unknown = set(cols) - set(schema.names)
@@ -257,7 +276,14 @@ def read_parts(
                 f"{p}: {meta.symbol} with steps {meta.price_step}/{meta.qty_step}, "
                 f"expected {expect.symbol} with {expect.price_step}/{expect.qty_step}"
             )
-        pieces.append(pq.read_table(p, columns=cols))
+        if between is None:
+            pieces.append(pq.read_table(p, columns=cols))
+            continue
+        t = TIME_COLUMN[table]
+        if not _may_overlap(pq.ParquetFile(p).metadata, t, between):
+            continue
+        lo, hi = between
+        pieces.append(pq.read_table(p, columns=cols, filters=[(t, ">=", lo), (t, "<", hi)]))
     if not pieces:
         return pa.Table.from_batches([], schema=pa.schema([schema.field(c) for c in cols]))
     return pa.concat_tables(pieces)
