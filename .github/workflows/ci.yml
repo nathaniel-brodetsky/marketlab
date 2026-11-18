@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install
+        run: pip install -e '.[dev]'
+      - name: lint
+        run: ruff check . && ruff format --check .
+      - name: test
+        run: pytest
+      - name: commands on a synthetic day
+        run: |
+          marketlab synth "$RUNNER_TEMP/synth" --seconds 120
+          D="$RUNNER_TEMP/synth/binance/BTCUSDT/2026-11-21"
+          marketlab day "$D"
+          marketlab bars "$D"
+          marketlab synth "$RUNNER_TEMP/train" --seconds 300 --seed 2
+          marketlab features "$D" --train "$RUNNER_TEMP/train/binance/BTCUSDT/2026-11-21"

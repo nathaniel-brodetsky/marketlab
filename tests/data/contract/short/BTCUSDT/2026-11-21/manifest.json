@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "symbol": "BTCUSDT",
+  "date": "2026-11-21",
+  "price_step": "0.01000000",
+  "qty_step": "0.00001000",
+  "host": "vm",
+  "runs": [
+    {
+      "recorder": "marketrec 0.1.0 (2467311ebe17)",
+      "first_recv_ts": 1795255200000000000,
+      "last_recv_ts": 1795255202992000000,
+      "book_at_start": null,
+      "derivation": 1
+    }
+  ],
+  "rows": {
+    "book_l20": 30,
+    "book_ticker": 510,
+    "depth_diff": 1052,
+    "link_rtt": 0,
+    "quality": 2,
+    "trades": 210
+  },
+  "files": {
+    "book_l20": [
+      "book_l20/part-000.parquet"
+    ],
+    "book_ticker": [
+      "book_ticker/part-000.parquet"
+    ],
+    "depth_diff": [
+      "depth_diff/part-000.parquet"
+    ],
+    "quality": [
+      "quality/part-000.parquet"
+    ],
+    "trades": [
+      "trades/part-000.parquet"
+    ]
+  },
+  "quality": {
+    "connected": 1,
+    "synced": 1
+  },
+  "covered_ns": 2992000000,
+  "synced_ns": 2989000000,
+  "synced_share": 0.9989973262032086,
+  "late_ns": 0,
+  "lag": {
+    "counts": {
+      "140": 30
+    },
+    "below_zero": 0,
+    "max_ns": 140000000
+  },
+  "lag_p50_ms": 140,
+  "lag_p99_ms": 140,
+  "rtt": {
+    "counts": {},
+    "below_zero": 0,
+    "max_ns": 0
+  },
+  "rtt_p50_ms": null,
+  "rtt_p99_ms": null,
+  "duplicates": 0
+}
