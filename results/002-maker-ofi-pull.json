@@ -1,0 +1,266 @@
+{
+ "id": "002",
+ "name": "maker-ofi-pull",
+ "kind": "maker",
+ "hypothesis": "Passive orders at the best price that are withdrawn whenever the order-flow imbalance of the last second points against them (level 1, divided by its standard deviation over the hour before, beyond one unit) lose less to adverse selection than the same orders left to rest: the quantity-weighted mean 10-second markout of their fills is higher, under the pessimistic queue at 300 ms latency, beyond what the same rule finds with the imbalance shifted in time.",
+ "spec": "002-maker-ofi-pull.yaml",
+ "spec_commit": "8a66c60d1a4cbaf4f324cabeb377aedf52bdffe9",
+ "head": "001e542e01eeffcb0f1444607f3e26f150e09067",
+ "dirty": false,
+ "marketlab": "0.1.0",
+ "run_at": "2026-11-18T23:27:39+00:00",
+ "data": {
+  "symbol": "BTCUSDT",
+  "days": [
+   {
+    "date": "2025-03-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-04-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-05-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-06-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-07-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-08-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-09-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-10-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-11-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-12-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2026-01-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-02-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-03-01",
+    "usable_hours": 23.998
+   },
+   {
+    "date": "2026-04-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-05-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-06-01",
+    "usable_hours": 23.989
+   },
+   {
+    "date": "2026-07-01",
+    "usable_hours": 23.998
+   }
+  ],
+  "skipped": [
+   {
+    "date": "2026-11-17",
+    "usable_hours": 0.312
+   }
+  ],
+  "holdout": [
+   "2026-08-01",
+   "2026-09-01",
+   "2026-10-01",
+   "2026-11-01"
+  ]
+ },
+ "orders": {
+  "every": "10s",
+  "size": "0.001",
+  "cancel_after": "10s",
+  "latency": "300ms",
+  "queue": "pessimistic"
+ },
+ "signal": {
+  "window": "1s",
+  "threshold": 1.0
+ },
+ "markout": "10s",
+ "by_day": {
+  "2025-03-01": {
+   "base": -1.292742706657512,
+   "rule": -1.328839282034137,
+   "delta": -0.03609657537662514,
+   "fills_kept": 0.6997378242497146
+  },
+  "2025-04-01": {
+   "base": -1.3525826506424485,
+   "rule": -1.3826680590290565,
+   "delta": -0.030085408386608004,
+   "fills_kept": 0.7081122785806893
+  },
+  "2025-05-01": {
+   "base": -1.3310378571204073,
+   "rule": -1.3344418407035887,
+   "delta": -0.0034039835831813914,
+   "fills_kept": 0.7048651641411025
+  },
+  "2025-06-01": {
+   "base": -1.3069157681422139,
+   "rule": -1.3436550859243506,
+   "delta": -0.03673931778213668,
+   "fills_kept": 0.7550032791412101
+  },
+  "2025-07-01": {
+   "base": -1.2162963266403206,
+   "rule": -1.2018148613168451,
+   "delta": 0.014481465323475495,
+   "fills_kept": 0.7425932579695818
+  },
+  "2025-08-01": {
+   "base": -1.335730575493321,
+   "rule": -1.3513594107854894,
+   "delta": -0.015628835292168297,
+   "fills_kept": 0.7383941663015301
+  },
+  "2025-09-01": {
+   "base": -1.3504367158554134,
+   "rule": -1.3971338961071342,
+   "delta": -0.04669718025172087,
+   "fills_kept": 0.7378543612646714
+  },
+  "2025-10-01": {
+   "base": -1.27693671581133,
+   "rule": -1.2941306970637263,
+   "delta": -0.01719398125239624,
+   "fills_kept": 0.7583652272363677
+  },
+  "2025-11-01": {
+   "base": -1.0326854155075171,
+   "rule": -1.0385076302513592,
+   "delta": -0.005822214743842036,
+   "fills_kept": 0.7685108312050457
+  },
+  "2025-12-01": {
+   "base": -1.3876304934332002,
+   "rule": -1.4254491250976722,
+   "delta": -0.03781863166447197,
+   "fills_kept": 0.7661491805848349
+  },
+  "2026-01-01": {
+   "base": -1.036366095219253,
+   "rule": -1.0428164451321495,
+   "delta": -0.0064503499128965025,
+   "fills_kept": 0.7712502403972237
+  },
+  "2026-02-01": {
+   "base": -1.4405155145576103,
+   "rule": -1.4110576177525969,
+   "delta": 0.029457896805013428,
+   "fills_kept": 0.7677750102720118
+  },
+  "2026-03-01": {
+   "base": -1.5408689249835807,
+   "rule": -1.5799531782797398,
+   "delta": -0.039084253296159055,
+   "fills_kept": 0.7698764583807273
+  },
+  "2026-04-01": {
+   "base": -1.2562013452981133,
+   "rule": -1.2875035791738176,
+   "delta": -0.0313022338757043,
+   "fills_kept": 0.7558391031287323
+  },
+  "2026-05-01": {
+   "base": -1.204315742238994,
+   "rule": -1.1897910047921094,
+   "delta": 0.01452473744688465,
+   "fills_kept": 0.7575518849713576
+  },
+  "2026-06-01": {
+   "base": -1.2681935446747923,
+   "rule": -1.2812952396787285,
+   "delta": -0.013101695003936209,
+   "fills_kept": 0.7464279038571492
+  },
+  "2026-07-01": {
+   "base": -1.298590855403138,
+   "rule": -1.2911546989397973,
+   "delta": 0.007436156463340726,
+   "fills_kept": 0.7421508878219327
+  }
+ },
+ "mean_delta_bp": -0.014913200257831317,
+ "se_bp": 0.005436018627596239,
+ "positive_share": 0.23529411764705882,
+ "surrogates": {
+  "shift": {
+   "n": 200,
+   "percentile": 95.0,
+   "threshold": -0.001009636408860488,
+   "real": -0.014913200257831317,
+   "p": 0.9502487562189055,
+   "mean": -0.007690750178833793
+  }
+ },
+ "pbo": {
+  "pbo": 0.06099456099456099,
+  "combinations": 12870,
+  "median_logit": 0.9162907318741551
+ },
+ "variants": {
+  "window 1s, threshold 0.5": -0.03154568451620244,
+  "window 1s, threshold 1": -0.014913200257831317,
+  "window 1s, threshold 2": -0.007500305538520716,
+  "window 5s, threshold 0.5": -0.03242168061319859,
+  "window 5s, threshold 1": -0.008984682370895121,
+  "window 5s, threshold 2": -0.004716272022499579
+ },
+ "modes": {
+  "pessimistic": -0.014913200257831317,
+  "proportional": -0.007685121278629453,
+  "optimistic": 0.016478262654976303
+ },
+ "stability": {
+  "time_of_day": {
+   "00-06 UTC": -0.021030878471564485,
+   "06-12 UTC": -0.017047545970383382,
+   "12-18 UTC": -0.02020244225456369,
+   "18-24 UTC": -0.03321176756110722
+  },
+  "volatility_tercile": {
+   "low": -0.01569565444995047,
+   "middle": -0.03345212505695794,
+   "high": -0.030708672246108737
+  }
+ },
+ "p_raw": 0.9927858411210949,
+ "p_bh": 0.9927858411210949,
+ "verdict": "failed",
+ "reasons": [
+  "mean difference -0.0149 bp is not above 0.0",
+  "p after Benjamini-Hochberg 0.993 is not below 0.05",
+  "not above the 95th percentile of shifted signals",
+  "positive on 24% of days, the hypothesis asks for 60%"
+ ]
+}
