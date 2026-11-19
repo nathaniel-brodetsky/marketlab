@@ -456,6 +456,98 @@ def cmd_experiment_list(a: argparse.Namespace) -> int:
     return 0
 
 
+def _fee(text: str) -> float:
+    return float(text)
+
+
+def cmd_strategy(a: argparse.Namespace) -> int:
+    from . import strategy as st
+    from .execution import Mode
+    from .io.days import survey
+
+    q = st.Quoting(
+        size=Decimal(a.size),
+        life=a.life,
+        max_position=a.max_position,
+        latency=a.latency,
+        window=None if a.signal == "none" else a.signal,
+        threshold=a.threshold,
+    )
+    found = survey(a.data, a.symbol, exclude=a.exclude)
+    if a.days:
+        found = [d for d in found if d.date in set(a.days)]
+        missing = sorted(set(a.days) - {d.date for d in found})
+        if missing:
+            raise ContractError(f"no finished days {', '.join(missing)} under {a.data}")
+    days = [d for d in found if d.usable_hours >= a.min_hours]
+    short = [d for d in found if d.usable_hours < a.min_hours]
+    if not days:
+        raise ContractError(f"no {a.symbol} day under {a.data} with {a.min_hours:g} usable hours")
+    print(f"rule        {q.name}")
+    print(f"days        {len(days)}, {days[0].date} .. {days[-1].date}")
+    if short:
+        text = ", ".join(f"{d.date} {d.usable_hours:.1f} h" for d in short)
+        print(f"skipped     under {a.min_hours:g} usable hours: {text}")
+    rows = []
+    for name in a.modes:
+        mode = Mode(name)
+        results = st.run([d.path for d in days], q, mode, workers=a.workers)
+        t = st.table(results).with_columns(
+            hours=pl.Series([d.usable_hours for d in days]), rule=pl.lit(q.name)
+        )
+        rows.append(t)
+        s = st.summarize(results)
+        print(f"\n{mode} queue")
+        shown = t.select(
+            "date",
+            pl.col("hours").round(1),
+            "fills",
+            pl.col("notional").round(0),
+            pl.col("gross").round(2),
+            pl.col("captured").round(2),
+            pl.col("inventory").round(2),
+            pl.col("break_even_bp").round(3).alias("be_bp"),
+            pl.col("end_position").alias("end_pos"),
+            pl.col("max_position").alias("max_pos"),
+            ((pl.col("quoted_bid") + pl.col("quoted_ask")) / 2).round(2).alias("quoted"),
+        )
+        with pl.Config(
+            tbl_rows=-1, tbl_cols=-1, tbl_width_chars=200, tbl_hide_dataframe_shape=True
+        ):
+            print(shown)
+        print(
+            f"per day     {s.fills_per_day:.0f} fills, {s.notional_per_day:,.0f} traded, "
+            f"{s.gross_per_day:+,.2f} gross (quote currency, before fees)"
+        )
+        print(
+            f"per traded  captured against the mid {s.captured_bp:+.3f} bp, "
+            f"inventory {s.inventory_bp:+.3f} bp"
+        )
+        print(
+            f"break-even  maker fee {s.break_even_bp:+.3f} +- {s.break_even_se:.3f} bp "
+            f"(mean of days +- standard error); gross positive on {s.positive_days:.0%} of days"
+        )
+        for fee in a.fees:
+            net = [r.net(fee) for r in results]
+            print(
+                f"fee {fee:+6.2f} bp  net {s.net_per_day(fee):+,.2f} a day, "
+                f"positive on {np.mean([x > 0 for x in net]):.0%} of days"
+            )
+    print(
+        "\nfees in basis points of traded notional, negative a rebate; conclusions from the "
+        "pessimistic queue; every order goes through the simulator alone (the market does "
+        "not react to it)"
+    )
+    if a.out:
+        out = pl.concat(rows)
+        if a.out.endswith(".csv"):
+            out.write_csv(a.out)
+        else:
+            out.write_parquet(a.out)
+        print(f"written     {a.out}")
+    return 0
+
+
 def cmd_synth(a: argparse.Namespace) -> int:
     s = synth.Scenario(
         seed=a.seed,
@@ -524,6 +616,42 @@ def parser() -> argparse.ArgumentParser:
     xl.add_argument("--results", default="results")
     xl.add_argument("--experiments", default="experiments")
     xl.set_defaults(run=cmd_experiment_list)
+
+    g = sub.add_parser(
+        "strategy", help="quote both sides through the fill simulator: P&L and break-even fee"
+    )
+    g.add_argument("--data", required=True, help="data root of marketrec, e.g. ../marketrec/data")
+    g.add_argument("--symbol", default="BTCUSDT")
+    g.add_argument("--days", nargs="*", default=[], help="only these dates (default: all)")
+    g.add_argument("--exclude", nargs="*", default=[], help="leave these dates out")
+    g.add_argument("--min-hours", type=float, default=20.0, help="usable hours a day (default 20)")
+    g.add_argument("--size", default="0.001", help="order size in base units (default 0.001)")
+    g.add_argument("--life", default="10s", help="an order rests at most this long (default 10s)")
+    g.add_argument("--max-position", type=int, default=5, help="in orders, either side (default 5)")
+    g.add_argument("--latency", default="300ms", help="decision to effect (default 300ms)")
+    g.add_argument(
+        "--signal",
+        default="none",
+        help="OFI window to withdraw orders on, e.g. 1s; none: no signal (default)",
+    )
+    g.add_argument("--threshold", type=float, default=1.0, help="the signal's (default 1.0)")
+    g.add_argument(
+        "--modes",
+        nargs="+",
+        default=["pessimistic"],
+        choices=["pessimistic", "proportional", "optimistic"],
+        help="queue modes (default: pessimistic)",
+    )
+    g.add_argument(
+        "--fees",
+        nargs="+",
+        type=_fee,
+        default=[-1.0, 0.0, 1.0, 2.0, 7.5],
+        help="maker fees to show, bp; negative: rebate (default -1 0 1 2 7.5)",
+    )
+    g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
+    g.add_argument("--out", help="per-day table to this .csv or .parquet file")
+    g.set_defaults(run=cmd_strategy)
 
     s = sub.add_parser("synth", help="write a synthetic day to try the commands")
     s.add_argument("out", help="data root, e.g. /tmp/synth")

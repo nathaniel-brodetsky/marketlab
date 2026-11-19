@@ -592,6 +592,44 @@ M = [
         "            pass",
         "a hypothesis run first is adjusted only for those run before it",
     ),
+    (
+        "marketlab/strategy.py",
+        "while pending and pending[0][0] <= t:",
+        "while pending:",
+        "the position limit counts fills not received yet",
+    ),
+    (
+        "marketlab/strategy.py",
+        "if side * position + qty > q.max_position * qty:",
+        "if side * position > q.max_position * qty:",
+        "an order that takes the position past its limit",
+    ),
+    (
+        "marketlab/strategy.py",
+        "        i = self.row(t)\n        if i < 0 or not self.against[side][i]:",
+        "        i = self.row(t)\n        i = min(i + 1, len(self.ts) - 1) if i >= 0 else i\n"
+        "        if i < 0 or not self.against[side][i]:",
+        "the strategy reads the signal one row ahead",
+    ),
+    (
+        "marketlab/strategy.py",
+        "                nxt[side] = r.final\n",
+        "                nxt[side] = r.final if r.outcome not in (Outcome.REJECTED, Outcome.UNKNOWN)"
+        " else t + RETRY\n",
+        "a rejection known before the order arrives",
+    ),
+    (
+        "marketlab/strategy.py",
+        "reach = life + 2 * lat + 2 * SEC",
+        "reach = life",
+        "a piece read too short for the orders decided at its end",
+    ),
+    (
+        "marketlab/strategy.py",
+        'captured=float((signed * (fills["mid"] - fills["price"])).sum())',
+        'captured=float((signed * (fills["price"] - fills["mid"])).sum())',
+        "captured spread with the wrong sign",
+    ),
 ]
 survived = []
 for f, old, new, label in M:
