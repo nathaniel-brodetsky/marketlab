@@ -1,0 +1,42 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+id: "003"
+name: hawkes-vol
+kind: volatility
+hypothesis: >
+  Market orders as a two-sided Hawkes process (buys and sells exciting each other), fitted
+  every five minutes on the ten minutes before, add to HAR in forecasting the log realized
+  volatility of the mid over the next 10 seconds: the log of the total intensity now, its
+  change over the last minute and the branching ratio lower HAR's out-of-sample squared
+  error, beyond what the same columns do shifted in time.
+
+data:
+  symbol: BTCUSDT
+  min_hours: 20
+  min_days: 12
+  holdout: [2026-08-01, 2026-09-01, 2026-10-01, 2026-11-01]   # opened once, at the end
+
+sampling: 10s            # the first grid row of each 10 s: targets do not overlap
+target: {horizon: 10s, floor_bp: 0.1}   # log(0.1 bp + realized volatility of the next 10 s)
+
+feature:                 # HAR's log realized volatility of the last 10 s, 60 s, 300 s, plus
+  method: hawkes
+  params: {window: 10m, step: 5m}
+
+variants:                # the same hypothesis with other parameters, for PBO
+  - {window: 5m, step: 5m}
+  - {window: 10m, step: 5m}
+  - {window: 30m, step: 5m}
+
+protocol:
+  folds: 5               # purged k-fold over days
+  embargo: 300s
+  surrogates: 200        # the feature's columns rolled within each day by at least min_shift
+  min_shift: 10m
+  seed: 3
+
+success:
+  min_gain: 0.0          # 1 - MSE(HAR with the feature) / MSE(HAR), mean of days
+  alpha: 0.05            # p (one-sided t over days) after Benjamini-Hochberg
+  surrogate_percentile: 95
+  max_pbo: 0.5
+  min_positive_days: 0.6

@@ -47,7 +47,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab bars DIR [--every 1s]` | time bars against tick, volume and dollar bars: return distribution and dependence |
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
-| `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, or a `maker` rule) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
+| `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, a `maker` rule or a `volatility` forecast) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
 | `marketlab experiment list` | every recorded hypothesis with its verdict and its p-value adjusted for all of them |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
 
@@ -100,7 +100,8 @@ marketrec (Rust)                         marketlab (Python)
                                            registry   every method by name
                                            view/      what the app's screens show, tested
                                            app/       the Streamlit application
-                                           next:      events/
+                                           events/    market orders as a Hawkes process
+                                           volatility HAR and a feature against the next seconds
 ```
 
 Prices and quantities stay integers (steps of the symbol) until a feature turns them into
@@ -169,6 +170,33 @@ All features are reported on one grid: the `book_l20` rows inside segments, abou
 
 Every method has `fit(train_days)` and `transform(day)`. A method is one class and one line
 in `marketlab/registry.py`; the tests then cover it.
+
+## Point processes (layer 2)
+
+`marketlab/events/hawkes.py`: aggressive buying and selling as a two-dimensional Hawkes
+process with an exponential kernel, each market order raising for a while the chance of
+the next ones on both sides:
+
+    lambda_i(t) = mu_i + sum_j alpha_ij beta sum_{t_k^j < t} exp(-beta (t - t_k^j))
+
+- Events are market orders, not trades: trades with one exchange time and one aggressor
+  side are one order sweeping several levels, and counting them apart would plant
+  simultaneous events the model cannot have.
+- Maximum likelihood on a window, written out with its gradient in one pass over the
+  events (numba): the decayed sums S_j and their derivatives in beta D_j are carried
+  forward, D_j(t + dt) = exp(-beta dt) (D_j(t) + dt S_j(t)). Parameters on the log scale,
+  L-BFGS-B. The tests compare the likelihood and the gradient with direct double sums and
+  finite differences, and recover the parameters of simulated data (Ogata's thinning).
+- The branching ratio is the spectral radius of alpha: the share of orders caused by
+  earlier ones.
+- The time-rescaling check: between a side's events the compensator grows by an
+  exponential with mean 1 if the model is right; each window gets a Kolmogorov-Smirnov
+  p-value per side, and the share of windows that pass is reported. On simulated data the
+  right model passes and a Poisson model of the same events fails.
+- Rolling: a fit every `step` on the `window` of events before it, only where the window
+  lies inside one valid interval; the intensity at a time comes from the last fit made at
+  or before it, never one made later. On data with the rates of a BTCUSDT day (27 market
+  orders a second) a day of fits every 5 minutes on 10-minute windows takes seconds.
 
 ## Execution
 
@@ -290,6 +318,20 @@ one unit against the order, 10-second markouts, the same held-out days as 001.
 
 The held-out days are opened only after every hypothesis meant for them is committed, so
 that none is written having seen them.
+
+`kind: volatility` (`marketlab/volatility.py`) asks whether a feature forecasts the next
+seconds' volatility better than volatility does. The target is log(0.1 bp + the mid's
+realized volatility over the next 10 s), every 10 s, so targets do not overlap. Baselines,
+as the specification asks: the next window as the current one, and HAR (the log realized
+volatility of the last 10 s, 60 s and 300 s, by least squares). The candidate is HAR with
+the feature's columns. The metric is the gain over HAR by day, 1 - MSE(candidate) /
+MSE(HAR), out of sample on a purged k-fold over days; the control rolls the feature's
+columns within each day by at least ten minutes and fits again.
+`experiments/003-hawkes-vol.yaml`: the Hawkes log intensity, its change over the last
+minute and the branching ratio, from fits every five minutes on the ten before.
+`experiments/004-vpin-vol.yaml`: VPIN, with its bucket volume set from the development
+days' volume, and Andersen and Bondarenko's critique written into the hypothesis: HAR
+already holds recent volatility, so VPIN is expected to add nothing.
 
 ## No look-ahead
 

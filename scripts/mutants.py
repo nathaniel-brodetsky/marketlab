@@ -526,6 +526,66 @@ M = [
         "                if lo <= o.decided <= hi",
         "an order decided at a piece's end simulated twice",
     ),
+    (
+        "marketlab/events/hawkes.py",
+        "            grad[6] += (a00 * (s0 - beta * d0) + a01 * (s1 - beta * d1)) * inv",
+        "            grad[6] += (a00 * s0 + a01 * s1) * inv",
+        "the gradient in beta forgets the kernel's own decay",
+    ),
+    (
+        "marketlab/events/hawkes.py",
+        "        d0 = e * (d0 + dt * s0)",
+        "        d0 = e * d0",
+        "the derivative sum not carried forward",
+    ),
+    (
+        "marketlab/events/hawkes.py",
+        "    ll -= mu0 * horizon + a00 * c0 + a01 * c1 + mu1 * horizon + a10 * c0 + a11 * c1",
+        "    ll -= mu0 * horizon + a00 * c0 + mu1 * horizon + a10 * c0 + a11 * c1",
+        "a kernel left out of the compensator",
+    ),
+    (
+        "marketlab/events/hawkes.py",
+        "        (trade_ts[1:] != trade_ts[:-1]) | (buy[1:] != buy[:-1]) | (segment[1:] != segment[:-1])",
+        "        (trade_ts[1:] != trade_ts[:-1]) | (segment[1:] != segment[:-1])",
+        "a buy and a sell at one time taken for one order",
+    ),
+    (
+        "marketlab/events/hawkes.py",
+        "        first = -(-(lo + window) // step) * step",
+        "        first = -(-lo // step) * step",
+        "a window that starts before its interval",
+    ),
+    (
+        "marketlab/events/hawkes.py",
+        '    k = np.searchsorted(r.at, query, side="right") - 1',
+        '    k = np.searchsorted(r.at, query, side="left") - 1',
+        "a fit not used at its own time",
+    ),
+    (
+        "marketlab/volatility.py",
+        '        return 1.0 - self.candidate / self.har if self.har > 0 else float("nan")',
+        '        return 1.0 - self.har / self.candidate if self.har > 0 else float("nan")',
+        "the gain the wrong way round",
+    ),
+    (
+        "marketlab/volatility.py",
+        "        out[r] = np.roll(f[r], lag, axis=0)",
+        "        out[r] = f[r]",
+        "volatility surrogates not shifted",
+    ),
+    (
+        "marketlab/volatility.py",
+        "    dev = [d for d in every if d.usable_hours >= spec.min_hours and d.date not in spec.holdout]",
+        "    dev = [d for d in every if d.usable_hours >= spec.min_hours]",
+        "the held-out days in the final fit",
+    ),
+    (
+        "marketlab/volatility.py",
+        "    lam_before, _ = hk.at_times(r, ts, side, query - minute, step)",
+        "    lam_before, _ = hk.at_times(r, ts, side, query, step)",
+        "the intensity's change measured against itself",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

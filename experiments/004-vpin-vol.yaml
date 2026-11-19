@@ -1,0 +1,42 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+id: "004"
+name: vpin-vol
+kind: volatility
+hypothesis: >
+  VPIN (Easley, Lopez de Prado, O'Hara 2012) adds to HAR in forecasting the log realized
+  volatility of the mid over the next 10 seconds: it lowers HAR's out-of-sample squared
+  error, beyond what it does shifted in time. Andersen and Bondarenko found its forecasting
+  power comes from its link to volume and volatility; HAR here already holds recent
+  volatility, so the expectation is that it adds nothing.
+
+data:
+  symbol: BTCUSDT
+  min_hours: 20
+  min_days: 12
+  holdout: [2026-08-01, 2026-09-01, 2026-10-01, 2026-11-01]   # opened once, at the end
+
+sampling: 10s
+target: {horizon: 10s, floor_bp: 0.1}
+
+feature:                 # bucket volume from the development days' volume per valid hour
+  method: vpin
+  params: {buckets_per_day: 1000, window: 50}
+
+variants:
+  - {buckets_per_day: 500, window: 50}
+  - {buckets_per_day: 1000, window: 50}
+  - {buckets_per_day: 2000, window: 50}
+
+protocol:
+  folds: 5
+  embargo: 300s
+  surrogates: 200
+  min_shift: 10m
+  seed: 4
+
+success:
+  min_gain: 0.0
+  alpha: 0.05
+  surrogate_percentile: 95
+  max_pbo: 0.5
+  min_positive_days: 0.6

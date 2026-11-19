@@ -317,11 +317,98 @@ def print_maker_report(r) -> None:
     print(f"verdict     {r.verdict}{reasons}")
 
 
+def print_volatility_report(r) -> None:
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    print(f"experiment  {r.spec.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    days = [d.date for d in r.days]
+    span = f"{days[0]} .. {days[-1]}" if days else "none"
+    print(f"days        {len(days)}, {span}; held out: {', '.join(r.spec.holdout) or 'none'}")
+    if r.skipped:
+        short = ", ".join(f"{d.date} {d.usable_hours:.1f} h" for d in r.skipped)
+        print(f"skipped     under {r.spec.min_hours:g} usable hours: {short}")
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    s = r.spec
+    print(
+        f"target      log({s.floor_bp:g} bp + realized volatility over the next {s.horizon}), "
+        f"every {s.sampling}; feature {s.primary.key}"
+    )
+    loss = [x for x in r.by_day.values() if np.isfinite(x.har)]
+    print(
+        "error       mean squared, mean of days: persistence "
+        f"{np.mean([x.persistence for x in loss]):.4f}, HAR {np.mean([x.har for x in loss]):.4f}, "
+        f"HAR with the feature {np.mean([x.candidate for x in loss]):.4f}"
+    )
+    print(
+        f"gain        over HAR {r.mean_gain:+.4f} +- {r.se:.4f}, p {r.p:.2g}, positive on "
+        f"{r.positive_share:.0%} of {len(loss)} days; "
+        f"over persistence {r.mean_gain_persistence:+.4f}"
+    )
+    sh = r.surrogate["shift"]
+    if sh["threshold"] is None:
+        print("surrogates  shift  none: no day long enough to shift the feature")
+    else:
+        print(
+            f"surrogates  shift  real {sh['real']:+.4f}, {sh['percentile']:g}th percentile "
+            f"of {sh['n']}: {sh['threshold']:+.4f}, p {sh['p']:.3g}"
+        )
+    if r.pbo:
+        print(f"pbo         {r.pbo.pbo:.2f} over {len(s.variants)} variants")
+    for name, v in r.variants.items():
+        print(f"variant     {name}: {v:+.4f}" if v is not None else f"variant     {name}: -")
+    st = r.stability
+
+    def fmt(d: dict) -> str:
+        return ", ".join(f"{k} {v:+.4f}" if v is not None else f"{k} -" for k, v in d.items())
+
+    print(f"by time     {fmt(st['time_of_day'])}")
+    print(f"by vol      {fmt(st['volatility_tercile'])}")
+    diag = [d.get(s.primary.key) for d in r.diagnostics.values() if d.get(s.primary.key)]
+    if diag:
+        ks = [d["ks_pass_share"] for d in diag if d["ks_pass_share"] is not None]
+        br = [d["branching_median"] for d in diag if d["branching_median"] is not None]
+        print(
+            f"hawkes      {sum(d['fits'] for d in diag)} fits; the time-rescaling check accepts "
+            f"{np.mean(ks):.0%} of them; branching ratio, median of days {np.median(br):.2f}"
+        )
+    print(f"p, BH       {r.p_bh:.3g} with every hypothesis in the registry")
+    reasons = f": {'; '.join(r.reasons)}" if r.reasons else ""
+    print(f"verdict     {r.verdict}{reasons}")
+
+
 def cmd_experiment_run(a: argparse.Namespace) -> int:
     from . import experiment as ex
 
     spec_path = Path(a.spec)
     kind = kind_of(spec_path)
+    if kind == "volatility":
+        from . import volatility
+
+        spec = volatility.load_spec(spec_path)
+        results = _repo_dir(spec_path, "results", a.results)
+        cache = _repo_dir(spec_path, ".cache", a.cache)
+        if a.final:
+            rec = volatility.final(spec, a.data, results, cache)
+            print(f"held out    {', '.join(rec['days'])}: opened once, now recorded")
+            g = rec["mean_gain"]
+            print(
+                f"gain        over HAR {g:+.4f} (mean of days)"
+                if g is not None
+                else "gain        -"
+            )
+            for d, x in rec["by_day"].items():
+                print(
+                    f"            {d}: {x['gain']:+.4f}"
+                    if x and x["gain"] is not None
+                    else f"            {d}: -"
+                )
+            return 0
+        report = volatility.run(spec, a.data, results, cache, workers=a.workers)
+        print_volatility_report(report)
+        print(f"written     {results / (spec.slug + '.json')}")
+        return 0
     if kind == "maker":
         from . import maker
 
