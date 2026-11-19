@@ -3,9 +3,11 @@ maker fee, and the fee at which it breaks even.
 
 The rule, on each side separately:
 
-- one limit order of `size` at the best price on its side, post-only;
-- it rests until it fills or for `life`, whichever comes first; the next one goes to the
-  best price of the moment the last one's outcome is known: at once after a fill, after a
+- one limit order of `size` on each side, post-only: at the best price on its side, or,
+  with `offset_bp`, that far from the mid (a bid at or below the mid less `offset_bp`, an
+  ask at or above the mid plus it), never inside the best prices;
+- it rests until it fills or for `life`, whichever comes first; the next one is priced
+  from the best prices of the moment the last one's outcome is known: at once after a fill, after a
   cancel once the cancel has taken effect (`latency` later), after a post-only rejection
   when the order would have reached the book;
 - the position is limited: no order goes out that could take it beyond `max_position`
@@ -17,12 +19,15 @@ The rule, on each side separately:
   go out as without one.
 
 Each order goes through the simulator alone (`execution.simulate`): the market does not
-react to it, and its fills depend only on when it arrived and when it left. The orders of
-both sides follow one another in time, since the position limit ties them: a decision sees
-the fills received by its time and nothing later. A day starts flat; what is held at its
-end is valued at the day's last mid. The day goes through the simulator an hour at a time,
-as in `maker`, so that a busy day fits in memory; `tests/test_strategy.py` checks that the
-pieces give what the whole day gives.
+react to it, and its fills depend only on when it arrived and when it left. An order at a
+price deeper than the book shows rests behind whatever is there (`unseen="behind"`): it
+fills only once a depth update has shown its level and all of that level has traded, or
+when a trade goes through its price; `unseen` in the results is the share of such orders.
+The orders of both sides follow one another in time, since the position limit ties them: a
+decision sees the fills received by its time and nothing later. A day starts flat; what is
+held at its end is valued at the day's last mid. The day goes through the simulator an hour
+at a time, as in `maker`, so that a busy day fits in memory; `tests/test_strategy.py`
+checks that the pieces give what the whole day gives.
 
 Gross P&L is in quote currency, before fees; the fee is charged on the traded notional, a
 negative fee being a rebate. It splits into what the fills captured against the mid at the
@@ -62,12 +67,15 @@ class Quoting:
     latency: str = "300ms"
     window: str | None = None  # the signal's window; None: no signal
     threshold: float = 1.0
+    offset_bp: float = 0.0  # distance from the mid; 0: at the best prices
 
     def __post_init__(self) -> None:
         if self.max_position < 1:
             raise ValueError("max_position must be at least one order")
         if self.threshold < 0:
             raise ValueError("threshold must not be negative")
+        if not 0 <= self.offset_bp < 1e4:
+            raise ValueError("offset_bp must be from 0 to below 10000")
         for name in ("life", "latency") + (("window",) if self.window else ()):
             if duration_ns(getattr(self, name)) <= 0:
                 raise ValueError(f"{name} must be positive")
@@ -75,15 +83,16 @@ class Quoting:
     @property
     def name(self) -> str:
         sig = f"OFI {self.window} beyond {self.threshold:g}" if self.window else "no signal"
+        where = f"{self.offset_bp:g} bp from the mid" if self.offset_bp else "at the best prices"
         return (
-            f"{sig}; {self.size} a side, life {self.life}, at most {self.max_position} "
-            f"orders held, latency {self.latency}"
+            f"{sig}; {self.size} a side {where}, life {self.life}, at most "
+            f"{self.max_position} orders held, latency {self.latency}"
         )
 
 
 ORDER_SCHEMA = {
     "id": pl.Int64, "side": pl.Int8, "decided": pl.Int64, "price": pl.Int64,
-    "cancel": pl.Int64, "outcome": pl.String, "filled": pl.Int64,
+    "cancel": pl.Int64, "outcome": pl.String, "filled": pl.Int64, "unseen": pl.Boolean,
 }  # fmt: skip
 FILL_SCHEMA = {
     "id": pl.Int64, "side": pl.Int8, "ts": pl.Int64, "price": pl.Float64,
@@ -95,7 +104,8 @@ FILL_SCHEMA = {
 class DayResult:
     date: str
     mode: str
-    #: Our orders: id, side, decided, price (steps), cancel (decision), outcome, filled (steps).
+    #: Our orders: id, side, decided, price (steps), cancel (decision), outcome, filled
+    #: (steps), unseen (its level deeper than the book showed at its arrival).
     orders: pl.DataFrame
     #: Our fills: id, side, ts, price and mid at the fill (quote currency), qty (base units).
     fills: pl.DataFrame
@@ -110,6 +120,11 @@ class DayResult:
     @property
     def inventory(self) -> float:
         return self.gross - self.captured
+
+    @property
+    def unseen(self) -> float:
+        """Share of the orders that rested at a level the book did not show."""
+        return float(self.orders["unseen"].mean()) if len(self.orders) else float("nan")
 
     @property
     def per_notional_bp(self) -> float:
@@ -134,6 +149,7 @@ class DayResult:
             "max_position": self.max_position,
             "quoted_bid": self.quoted.get("bid", float("nan")),
             "quoted_ask": self.quoted.get("ask", float("nan")),
+            "unseen": self.unseen,
         }
 
 
@@ -184,13 +200,22 @@ def _next_true(a: np.ndarray, idx: np.ndarray, n: int) -> np.ndarray:
     return np.concatenate([np.minimum.accumulate(np.where(a, idx, n)[::-1])[::-1], [n]])
 
 
-def _best(m: Market, side: int, t: int, seg_start: int) -> int | None:
-    """The best price on `side` as last seen at or before `t`, in the segment."""
+def _price(m: Market, side: int, t: int, seg_start: int, offset_bp: float) -> int | None:
+    """The order's price in steps from the best prices last seen at or before `t` in the
+    segment: `offset_bp` from their mid, rounded away from it, and never inside them."""
     r = m.ticker["recv_ts"]
     i = int(np.searchsorted(r, t, side="right")) - 1
     if i < 0 or r[i] < seg_start:
         return None
-    return int(m.ticker["bid_px"][i] if side == BID else m.ticker["ask_px"][i])
+    bid, ask = int(m.ticker["bid_px"][i]), int(m.ticker["ask_px"][i])
+    return quote_price(side, bid, ask, offset_bp)
+
+
+def quote_price(side: int, bid: int, ask: int, offset_bp: float) -> int:
+    mid = (bid + ask) / 2
+    if side == BID:
+        return min(bid, int(np.floor(mid * (1 - offset_bp / 1e4))))
+    return max(ask, int(np.ceil(mid * (1 + offset_bp / 1e4))))
 
 
 def simulate_day(
@@ -269,7 +294,7 @@ def _quote(
                 continue
             if m is None:
                 m = Market.of(whole if lo is None else piece(lo - BEFORE, hi + reach))
-            price = _best(m, side, t, intervals[k][0])
+            price = _price(m, side, t, intervals[k][0], q.offset_bp)
             if price is None:
                 nxt[side] = t + RETRY
                 continue
@@ -279,9 +304,11 @@ def _quote(
                 if pull is not None:
                     cancel = pull
             o = Order(len(order_rows), side, qty, t, True, price, cancel)
-            r = simulate(m, [o], lat, mode)[0]
+            r = simulate(m, [o], lat, mode, unseen="behind")[0]
             filled = sum(fq for _, _, fq in r.fills)
-            order_rows.append((o.id, side, t, price, cancel, str(r.outcome), filled))
+            rested = r.outcome not in (Outcome.REJECTED, Outcome.UNKNOWN) and r.final > r.arrival
+            hidden = rested and r.queue_at_arrival is None
+            order_rows.append((o.id, side, t, price, cancel, str(r.outcome), filled, hidden))
             if r.fills:
                 ts = np.array([f[0] for f in r.fills], dtype=np.int64)
                 mids = m.mid_at(ts, np.full(len(ts), k))

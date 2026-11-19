@@ -630,6 +630,24 @@ M = [
         'captured=float((signed * (fills["price"] - fills["mid"])).sum())',
         "captured spread with the wrong sign",
     ),
+    (
+        "marketlab/execution/sim.py",
+        "            elif hidden:\n                continue  # behind all of a level not yet seen\n",
+        "",
+        "trades reach an order at a level not yet seen",
+    ),
+    (
+        "marketlab/execution/sim.py",
+        "                ahead, hidden = new + pending, False",
+        "                ahead, hidden = new, False",
+        "trades of the first update at an unseen level counted twice",
+    ),
+    (
+        "marketlab/strategy.py",
+        "return min(bid, int(np.floor(mid * (1 - offset_bp / 1e4))))",
+        "return min(bid, int(np.ceil(mid * (1 - offset_bp / 1e4))))",
+        "a bid away from the mid rounded towards it",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

@@ -1,6 +1,8 @@
-"""The market-making rule through the simulator: each order fills as the simulator gives it
-alone, the position stays within its limit, the accounts add up, a day in pieces gives what
-the whole day gives, and no decision depends on what came after it."""
+"""The market-making rule through the simulator: each order is priced by the rule and fills
+as the simulator gives it alone, the position stays within its limit, the accounts add up,
+a day in pieces gives what the whole day gives, and no decision depends on what came after
+it. At the best prices and away from them, where some orders rest at levels the book does
+not show."""
 
 from dataclasses import replace
 from decimal import Decimal
@@ -22,6 +24,11 @@ SEC = 1_000_000_000
 SIZE = Decimal("0.001")
 PLAIN = st.Quoting(size=SIZE, max_position=2)
 SIGNAL = st.Quoting(size=SIZE, max_position=2, window="1s", threshold=0.5)
+#: About 6 steps from the mid at 97000.00: away from the best prices, filled at times.
+AWAY = st.Quoting(size=SIZE, max_position=2, offset_bp=0.006)
+#: About 22 steps: past the 20 levels the book shows, often. Unseen levels filling are
+#: tested on queues built by hand in `test_execution.py`.
+DEEP = st.Quoting(size=SIZE, max_position=2, offset_bp=0.023)
 
 
 @pytest.fixture(scope="module")
@@ -31,40 +38,95 @@ def path(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
+def busy(tmp_path_factory):
+    """As many trades as book changes: the price moves enough to reach orders away from it."""
+    s = synth.Scenario(seed=7, seconds=600.0, trade_rate=20.0, book_rate=20.0, gaps=((300.0, 4.0),))
+    return synth.write(s, tmp_path_factory.mktemp("busy"))
+
+
+@pytest.fixture(scope="module")
 def results(path):
     return {q: st.simulate_day(path, q, chunk=None) for q in (PLAIN, SIGNAL)}
+
+
+@pytest.fixture(scope="module")
+def away(busy):
+    return {q: st.simulate_day(busy, q, chunk=None) for q in (AWAY, DEEP)}
 
 
 def steps(r: st.DayResult, day: Day) -> np.ndarray:
     return np.rint(r.fills["qty"].to_numpy() / float(day.qty_step)).astype(np.int64)
 
 
-@pytest.mark.parametrize("q", [PLAIN, SIGNAL], ids=["plain", "signal"])
-def test_each_order_fills_as_the_simulator_gives_it_alone(path, results, q):
-    r, day = results[q], Day.open(path)
+def check_orders(r: st.DayResult, day: Day, q: st.Quoting, min_fills: int = 50) -> None:
     m = Market.of(day)
     qty = int(q.size / day.qty_step)
     lat, life = duration_ns(q.latency), duration_ns(q.life)
-    assert len(r.orders) > 100 and len(r.fills) > 50
+    assert len(r.orders) > 80 and len(r.fills) >= min_fills
     by_id = {k[0]: g for k, g in r.fills.group_by("id")}
     tick = float(day.price_step)
     for row in r.orders.iter_rows(named=True):
         o = Order(row["id"], row["side"], qty, row["decided"], True, row["price"], row["cancel"])
-        alone = simulate(m, [o], lat)[0]
+        alone = simulate(m, [o], lat, unseen="behind")[0]
         assert str(alone.outcome) == row["outcome"]
+        rested = alone.final > alone.arrival and row["outcome"] not in ("rejected", "unknown")
+        assert row["unseen"] == (rested and alone.queue_at_arrival is None)
         got = by_id.get(row["id"], pl.DataFrame(schema=st.FILL_SCHEMA))
         assert got["ts"].to_list() == [f[0] for f in alone.fills]
         assert np.allclose(got["price"].to_numpy(), [f[1] * tick for f in alone.fills])
         assert row["filled"] == sum(f[2] for f in alone.fills)
-        # placed at the best price on its side as last seen, and out within its life
+        # priced from the best prices last seen, and out within its life
         t = m.ticker
         i = int(np.searchsorted(t["recv_ts"], row["decided"], side="right")) - 1
-        assert row["price"] == (t["bid_px"][i] if row["side"] == BID else t["ask_px"][i])
+        bid, ask = int(t["bid_px"][i]), int(t["ask_px"][i])
+        assert row["price"] == st.quote_price(row["side"], bid, ask, q.offset_bp)
+        if q.offset_bp == 0:
+            assert row["price"] == (bid if row["side"] == BID else ask)
         assert row["decided"] < row["cancel"] <= row["decided"] + life
     # one order a side at a time: the next is decided once the last is done
     for side in (BID, ASK):
         o = r.orders.filter(pl.col("side") == side).sort("decided")
         assert o["decided"].is_unique().all()
+
+
+@pytest.mark.parametrize("q", [PLAIN, SIGNAL], ids=["plain", "signal"])
+def test_each_order_fills_as_the_simulator_gives_it_alone(path, results, q):
+    check_orders(results[q], Day.open(path), q)
+
+
+@pytest.mark.parametrize("q", [AWAY, DEEP], ids=["away", "deep"])
+def test_orders_away_from_the_best_prices(busy, away, q):
+    r, day = away[q], Day.open(busy)
+    check_orders(r, day, q, min_fills=20 if q is AWAY else 0)
+    t = Market.of(day).ticker
+    i = np.searchsorted(t["recv_ts"], r.orders["decided"].to_numpy(), side="right") - 1
+    best = np.where(r.orders["side"].to_numpy() == BID, t["bid_px"][i], t["ask_px"][i])
+    assert (r.orders["price"].to_numpy() != best).mean() > 0.9
+    at_best = st.simulate_day(busy, replace(q, offset_bp=0.0), chunk=None)
+    assert at_best.unseen == 0 and r.fills.height < at_best.fills.height
+    if q is DEEP:
+        hidden = r.orders.filter(pl.col("unseen"))
+        assert r.unseen > 0.3 and r.unseen == pytest.approx(len(hidden) / len(r.orders))
+    # in pieces and cut short, as at the best prices
+    part = st.simulate_day(busy, q, chunk="2m")
+    assert part.orders.equals(r.orders) and part.fills.equals(r.fills)
+    cut = day.intervals[0][0] + 200 * SEC
+    short = st.simulate_in(day.truncated(cut), q)
+    done = pl.col("decided") + duration_ns(q.life) + 2 * duration_ns(q.latency) < cut
+    assert r.orders.filter(done).equals(short.orders.filter(done))
+    early = pl.col("decided") < cut
+    keys = ["id", "side", "decided", "price"]
+    assert r.orders.filter(early).select(keys).equals(short.orders.filter(early).select(keys))
+
+
+def test_quote_prices():
+    assert [st.quote_price(s, 100, 101, 0) for s in (BID, ASK)] == [100, 101]
+    assert [st.quote_price(s, 100, 101, 100) for s in (BID, ASK)] == [99, 102]  # 1% of 100.5
+    assert [st.quote_price(s, 90, 110, 1) for s in (BID, ASK)] == [90, 110]  # never inside
+    assert [st.quote_price(s, 9_700_000, 9_700_001, 1) for s in (BID, ASK)] == [
+        9_699_030,  # floor(9_700_000.5 * 0.9999) = floor(9_699_030.45)
+        9_700_971,  # ceil(9_700_000.5 * 1.0001) = ceil(9_700_970.55)
+    ]
 
 
 def test_the_position_stays_within_its_limit_and_each_decision_knew_it(path, results):
@@ -183,6 +245,8 @@ def test_quoting_is_checked(path):
         st.Quoting(max_position=0)
     with pytest.raises(ValueError, match="threshold"):
         st.Quoting(threshold=-1)
+    with pytest.raises(ValueError, match="offset_bp"):
+        st.Quoting(offset_bp=-0.5)
     with pytest.raises(ValueError, match="whole quantity steps"):
         st.simulate_day(path, st.Quoting(size=Decimal("0.000001")))
 
@@ -211,15 +275,19 @@ def test_summary_and_many_days(tmp_path, results):
 def test_the_command(tmp_path, capsys):
     data = tmp_path / "data"
     synth.write(synth.Scenario(seed=9, seconds=240), data)
-    out = tmp_path / "days.csv"
+    out = tmp_path / "runs" / "days.csv"
     code = main(
         ["strategy", "--data", str(data), "--min-hours", "0", "--signal", "1s",
-         "--modes", "pessimistic", "optimistic", "--fees", "-1", "0", "2", "--out", str(out)]
+         "--modes", "pessimistic", "optimistic", "--offsets", "0", "0.01",
+         "--fees", "-1", "0", "2", "--by-day", "--out", str(out)]
     )  # fmt: skip
     text = capsys.readouterr().out
     assert code == 0
-    assert "break-even  maker fee" in text and "fee  -1.00 bp" in text
-    assert "optimistic queue" in text
+    assert "0.01 bp from the mid, optimistic queue" in text and "at the best prices" in text
+    assert "be_bp" in text and "fee -1" in text and "fee 2" in text
     t = pl.read_csv(out)
-    assert t["mode"].to_list() == ["pessimistic", "optimistic"]
+    assert t["mode"].to_list() == ["pessimistic", "optimistic"] * 2
+    assert t["offset_bp"].to_list() == [0.0, 0.0, 0.01, 0.01]
+    assert main(["strategy", "--data", str(data), "--min-hours", "0"]) == 0
+    assert "from the mid, pessimistic" not in capsys.readouterr().out, "days only with --by-day"
     assert main(["strategy", "--data", str(data), "--min-hours", "30"]) == 2

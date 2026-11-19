@@ -461,11 +461,13 @@ def _fee(text: str) -> float:
 
 
 def cmd_strategy(a: argparse.Namespace) -> int:
+    from dataclasses import replace
+
     from . import strategy as st
     from .execution import Mode
     from .io.days import survey
 
-    q = st.Quoting(
+    base = st.Quoting(
         size=Decimal(a.size),
         life=a.life,
         max_position=a.max_position,
@@ -473,6 +475,7 @@ def cmd_strategy(a: argparse.Namespace) -> int:
         window=None if a.signal == "none" else a.signal,
         threshold=a.threshold,
     )
+    rules = [replace(base, offset_bp=o) for o in a.offsets]
     found = survey(a.data, a.symbol, exclude=a.exclude)
     if a.days:
         found = [d for d in found if d.date in set(a.days)]
@@ -483,69 +486,94 @@ def cmd_strategy(a: argparse.Namespace) -> int:
     short = [d for d in found if d.usable_hours < a.min_hours]
     if not days:
         raise ContractError(f"no {a.symbol} day under {a.data} with {a.min_hours:g} usable hours")
-    print(f"rule        {q.name}")
+    for q in rules:
+        print(f"rule        {q.name}")
     print(f"days        {len(days)}, {days[0].date} .. {days[-1].date}")
     if short:
         text = ", ".join(f"{d.date} {d.usable_hours:.1f} h" for d in short)
         print(f"skipped     under {a.min_hours:g} usable hours: {text}")
-    rows = []
-    for name in a.modes:
-        mode = Mode(name)
-        results = st.run([d.path for d in days], q, mode, workers=a.workers)
-        t = st.table(results).with_columns(
-            hours=pl.Series([d.usable_hours for d in days]), rule=pl.lit(q.name)
-        )
-        rows.append(t)
-        s = st.summarize(results)
-        print(f"\n{mode} queue")
-        shown = t.select(
-            "date",
-            pl.col("hours").round(1),
-            "fills",
-            pl.col("notional").round(0),
-            pl.col("gross").round(2),
-            pl.col("captured").round(2),
-            pl.col("inventory").round(2),
-            pl.col("break_even_bp").round(3).alias("be_bp"),
-            pl.col("end_position").alias("end_pos"),
-            pl.col("max_position").alias("max_pos"),
-            ((pl.col("quoted_bid") + pl.col("quoted_ask")) / 2).round(2).alias("quoted"),
-        )
-        with pl.Config(
-            tbl_rows=-1, tbl_cols=-1, tbl_width_chars=200, tbl_hide_dataframe_shape=True
-        ):
-            print(shown)
-        print(
-            f"per day     {s.fills_per_day:.0f} fills, {s.notional_per_day:,.0f} traded, "
-            f"{s.gross_per_day:+,.2f} gross (quote currency, before fees)"
-        )
-        print(
-            f"per traded  captured against the mid {s.captured_bp:+.3f} bp, "
-            f"inventory {s.inventory_bp:+.3f} bp"
-        )
-        print(
-            f"break-even  maker fee {s.break_even_bp:+.3f} +- {s.break_even_se:.3f} bp "
-            f"(mean of days +- standard error); gross positive on {s.positive_days:.0%} of days"
-        )
-        for fee in a.fees:
-            net = [r.net(fee) for r in results]
-            print(
-                f"fee {fee:+6.2f} bp  net {s.net_per_day(fee):+,.2f} a day, "
-                f"positive on {np.mean([x > 0 for x in net]):.0%} of days"
+    rows, summary, nets = [], [], []
+    for q in rules:
+        for name in a.modes:
+            mode = Mode(name)
+            results = st.run([d.path for d in days], q, mode, workers=a.workers)
+            t = st.table(results).with_columns(
+                hours=pl.Series([d.usable_hours for d in days]),
+                offset_bp=pl.lit(q.offset_bp),
+                rule=pl.lit(q.name),
             )
+            rows.append(t)
+            s = st.summarize(results)
+            summary.append(
+                {
+                    "offset_bp": q.offset_bp,
+                    "mode": str(mode),
+                    "fills_day": round(s.fills_per_day),
+                    "traded_day": round(s.notional_per_day),
+                    "gross_day": round(s.gross_per_day, 2),
+                    "captured_bp": round(s.captured_bp, 3),
+                    "inventory_bp": round(s.inventory_bp, 3),
+                    "be_bp": round(s.break_even_bp, 3),
+                    "be_se": round(s.break_even_se, 3),
+                    "gross_pos": round(s.positive_days, 2),
+                    "unseen": round(float(np.mean([r.unseen for r in results])), 2),
+                    "quoted": round(float(t.select(
+                        (pl.col("quoted_bid") + pl.col("quoted_ask")) / 2).mean().item()), 2),
+                }
+            )  # fmt: skip
+            nets.append(
+                {"offset_bp": q.offset_bp, "mode": str(mode)}
+                | {f"fee {f:g}": round(s.net_per_day(f), 2) for f in a.fees}
+            )
+            if a.by_day:
+                print(f"\n{q.offset_bp:g} bp from the mid, {mode} queue")
+                shown = t.select(
+                    "date",
+                    pl.col("hours").round(1),
+                    "fills",
+                    pl.col("notional").round(0),
+                    pl.col("gross").round(2),
+                    pl.col("captured").round(2),
+                    pl.col("inventory").round(2),
+                    pl.col("break_even_bp").round(3).alias("be_bp"),
+                    pl.col("end_position").alias("end_pos"),
+                    pl.col("max_position").alias("max_pos"),
+                    ((pl.col("quoted_bid") + pl.col("quoted_ask")) / 2).round(2).alias("quoted"),
+                    pl.col("unseen").round(2),
+                )
+                with _wide():
+                    print(shown)
+    with _wide():
+        print("\nper day, mean over days (quote currency, before fees); per traded notional, bp")
+        print(pl.DataFrame(summary))
+        print(
+            "\nnet a day (quote currency) at each maker fee, bp of traded notional; "
+            "negative: a rebate"
+        )
+        print(pl.DataFrame(nets))
     print(
-        "\nfees in basis points of traded notional, negative a rebate; conclusions from the "
-        "pessimistic queue; every order goes through the simulator alone (the market does "
-        "not react to it)"
+        "\nbe_bp: the maker fee at which it breaks even, mean of days, be_se its standard "
+        "error; gross_pos: share of days with a positive gross P&L; unseen: share of orders "
+        "at a level the book did not show (rested behind all of it); quoted: share of the "
+        "time with an order in the book. Conclusions from the pessimistic queue; every order "
+        "goes through the simulator alone (the market does not react to it)"
     )
     if a.out:
         out = pl.concat(rows)
+        Path(a.out).parent.mkdir(parents=True, exist_ok=True)
         if a.out.endswith(".csv"):
             out.write_csv(a.out)
         else:
             out.write_parquet(a.out)
         print(f"written     {a.out}")
     return 0
+
+
+def _wide() -> pl.Config:
+    return pl.Config(
+        tbl_rows=-1, tbl_cols=-1, tbl_width_chars=220, tbl_hide_dataframe_shape=True,
+        tbl_hide_column_data_types=True,
+    )  # fmt: skip
 
 
 def cmd_synth(a: argparse.Namespace) -> int:
@@ -649,6 +677,14 @@ def parser() -> argparse.ArgumentParser:
         default=[-1.0, 0.0, 1.0, 2.0, 7.5],
         help="maker fees to show, bp; negative: rebate (default -1 0 1 2 7.5)",
     )
+    g.add_argument(
+        "--offsets",
+        nargs="+",
+        type=float,
+        default=[0.0],
+        help="distances of the orders from the mid, bp, one run each; 0: at the best prices",
+    )
+    g.add_argument("--by-day", action="store_true", help="a table of the days for each run")
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
     g.add_argument("--out", help="per-day table to this .csv or .parquet file")
     g.set_defaults(run=cmd_strategy)

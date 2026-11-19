@@ -47,7 +47,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab bars DIR [--every 1s]` | time bars against tick, volume and dollar bars: return distribution and dependence |
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
-| `marketlab strategy --data ROOT [--signal 1s] [--threshold 1] [--life 10s] [--max-position 5] [--modes ...] [--fees ...] [--workers N] [--out FILE]` | a market-making rule quoting both sides through the fill simulator, day by day: P&L before fees, what the fills captured against the mid and what the position lost, the maker fee at which it breaks even, net P&L at given fees |
+| `marketlab strategy --data ROOT [--offsets 0 1 2] [--signal 1s] [--threshold 1] [--life 10s] [--max-position 5] [--modes ...] [--fees ...] [--by-day] [--workers N] [--out FILE]` | a market-making rule quoting both sides through the fill simulator, day by day: P&L before fees, what the fills captured against the mid and what the position lost, the maker fee at which it breaks even, net P&L at given fees |
 | `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, a `maker` rule or a `volatility` forecast) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
 | `marketlab experiment list` | every hypothesis, run or only written, with its verdict and its p-value adjusted for all of them as they stand |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
@@ -222,6 +222,12 @@ same time, so an order can fill while its cancel is on the way.
   yet. A trade at its price that hits its side uses up the quantity ahead, then fills the
   order; a trade at a worse price means the level was taken out and fills it whole.
   Quantity added to the level joins behind it.
+- **A price deeper than the book shows** (past its 20 levels, with no depth update there
+  since the snapshot) has a queue that cannot be known: the outcome is `unknown`. Asked
+  to (`unseen="behind"`, as `marketlab strategy` does), the order rests anyway behind
+  everything there: trades at its price do not reach it until a depth update shows the
+  level, and all of that level is taken to be ahead of it, in every mode. A trade at a
+  worse price still fills it.
 - **Cancels in the queue.** When a depth update shows the level smaller than the trades
   since the last update explain, the rest was cancelled, ahead of the order or behind it:
   the data cannot say. `pessimistic`: all behind; `proportional`: the share ahead is the
@@ -244,7 +250,7 @@ three.
 `tests/test_execution.py` builds queues by hand where the answer is known: trades using up
 the queue, cancels in each mode, the cap at the level, a trade through the price, a fill
 while the cancel is on the way, trades seen before arrival, a trade received after its
-depth update, a crossing order, a hole, the end of the data, a market order walking the
+depth update, a crossing order, a level the book does not show, a hole, the end of the data, a market order walking the
 book, signed markouts and markouts stopped by a hole.
 
 ## Strategy
@@ -253,9 +259,11 @@ book, signed markouts and markouts stopped by a hole.
 simulator above, one day at a time, and answers one question: at what maker fee would it
 break even?
 
-- One post-only order of `--size` on each side at the best price. It rests until it fills
-  or for `--life`; the next goes to the best price of the moment the last one's outcome is
-  known: its last fill, its cancel taking effect, its arrival if it was rejected.
+- One post-only order of `--size` on each side at the best price, or, with `--offsets`,
+  that many basis points from the mid (rounded away from it, never inside the best
+  prices); each offset is a run of its own. An order rests until it fills or for
+  `--life`; the next is priced from the best prices of the moment the last one's outcome
+  is known: its last fill, its cancel taking effect, its arrival if it was rejected.
 - The position is limited to `--max-position` orders either way; at the limit only the
   side that reduces it is quoted.
 - With `--signal W`, an order is withdrawn, and none is placed, while the level-1
@@ -269,10 +277,14 @@ decision sees only the fills received by its time. Gross P&L splits into `captur
 fill against the mid at its time, and `inventory`, what the position then made or lost.
 The break-even fee is gross P&L per traded notional, in basis points: a maker fee below it
 leaves a profit, a negative one is a rebate. Conclusions from the pessimistic queue;
-`--modes` shows the others for sensitivity.
+`--modes` shows the others for sensitivity. An order away from the best prices may rest at
+a level the book does not show; it then waits behind all of it (see Execution), and
+`unseen` reports the share of such orders. The command prints one row per offset and
+queue mode, then net P&L a day at each of `--fees`; `--by-day` adds a table of the days
+for each run.
 
 `tests/test_strategy.py`: every order's fills are what the simulator gives it alone, at
-the best price last seen; the position never passes its limit and every decision knew it;
+the price the rule gives from the best prices last seen, at them and away from them; the position never passes its limit and every decision knew it;
 the accounts add up; a day in pieces equals the whole day, also for orders resting long
 past their piece; a day cut short changes no decision before the cut; the signal keeps
 orders out while it is against them, and a threshold no value reaches is no signal.

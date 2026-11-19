@@ -22,6 +22,12 @@ rejected. Otherwise it joins the end of its price level's queue:
    mode, no more can be ahead than the level holds. Conclusions are drawn from the
    pessimistic mode; the others show how much the answer depends on it.
 4. Quantity added to a level joins behind the order.
+5. A price beyond the levels the book shows (deeper than its 20 levels, and no depth update
+   at it since) has a queue that cannot be known. By default the order's outcome is then
+   `unknown`. With `unseen="behind"` it rests anyway, behind everything there: trades at
+   its price do not reach it until a depth update at that price shows the level, and the
+   whole of that level is taken to be ahead of it, in every mode. A trade at a worse price
+   still fills it.
 
 Trades are matched to depth updates by exchange time (a trade belongs to the first depth
 update at or after its trade time), so that one arriving after the update it is part of is
@@ -83,10 +89,24 @@ class Result:
     queue_at_arrival: int | None = None
 
 
+UNSEEN = ("unknown", "behind")
+
+
 def simulate(
-    m: Market, orders: Sequence[Order], latency: int, mode: Mode = Mode.PESSIMISTIC
+    m: Market,
+    orders: Sequence[Order],
+    latency: int,
+    mode: Mode = Mode.PESSIMISTIC,
+    unseen: str = "unknown",
 ) -> list[Result]:
-    return [(_passive if o.passive else _aggressive)(m, o, latency, Mode(mode)) for o in orders]
+    if unseen not in UNSEEN:
+        raise ValueError(f"unseen must be one of {UNSEEN}, not {unseen!r}")
+    return [
+        _passive(m, o, latency, Mode(mode), unseen)
+        if o.passive
+        else _aggressive(m, o, latency, Mode(mode))
+        for o in orders
+    ]
 
 
 def _aggressive(m: Market, o: Order, latency: int, mode: Mode) -> Result:
@@ -106,7 +126,7 @@ def _aggressive(m: Market, o: Order, latency: int, mode: Mode) -> Result:
     return Result(o, outcome, a, a, fills)
 
 
-def _passive(m: Market, o: Order, latency: int, mode: Mode) -> Result:
+def _passive(m: Market, o: Order, latency: int, mode: Mode, unseen: str = "unknown") -> Result:
     if o.price is None:
         raise ValueError(f"order {o.id}: a passive order needs a price")
     a = o.decided + latency
@@ -126,8 +146,9 @@ def _passive(m: Market, o: Order, latency: int, mode: Mode) -> Result:
         return Result(o, Outcome.REJECTED, a, a)
     level = book.qty(o.side, o.price)
     e0 = m.exchange_time(a)
-    if level is None or e0 is None:
+    if e0 is None or (level is None and unseen == "unknown"):
         return Result(o, Outcome.UNKNOWN, a, a)
+    hidden = level is None  # the level is not known until a depth update shows it
 
     tr = m.trades
     # trades that hit this side: sellers hit bids, buyers lift asks
@@ -139,8 +160,8 @@ def _passive(m: Market, o: Order, latency: int, mode: Mode) -> Result:
     lo = int(np.searchsorted(tr["recv_ts"], a, side="right"))
     seen = slice(0, lo)
     early = at_price[seen] & (tr["trade_ts"][seen] > e0)
-    ahead = max(level - int(tr["qty"][seen][early].sum()), 0)
-    queue = ahead
+    ahead = 0 if hidden else max(level - int(tr["qty"][seen][early].sum()), 0)
+    queue = None if hidden else ahead
 
     end = seg_end
     if o.cancel is not None:
@@ -172,6 +193,8 @@ def _passive(m: Market, o: Order, latency: int, mode: Mode) -> Result:
             if through[k]:
                 fills.append((ts, o.price, remaining))
                 remaining = 0
+            elif hidden:
+                continue  # behind all of a level not yet seen
             else:
                 x = int(tr["qty"][k])
                 used = min(x, ahead)
@@ -187,6 +210,10 @@ def _passive(m: Market, o: Order, latency: int, mode: Mode) -> Result:
             traded = int(p_qty[window].sum())
             applied = int(p_qty[window & ((p_recv <= ts) | (p_trade_ts <= e0))].sum())
             pending = traded - applied  # part of this update, not received yet
+            if hidden:  # the level seen for the first time: all of it ahead
+                ahead, hidden = new + pending, False
+                level_prev, e_prev = new, e
+                continue
             before = max(level_prev - traded, 0)
             cancelled = max(before - new, 0)
             now_ahead = max(ahead - pending, 0)

@@ -40,9 +40,10 @@ def l20(ts, uid, bids, asks):
     return (ts, uid, pad(bids, 0), pad(bids, 1), pad(asks, 0), pad(asks, 1))
 
 
-def market(trades=(), depth=(), quality=None, extra_tickers=()):
+def market(trades=(), depth=(), quality=None, extra_tickers=(), book=None):
     """`trades`: (recv ms, trade ms, price, qty, seller_aggressor);
-    `depth`: (recv ms, event ms, side, price, qty, update id)."""
+    `depth`: (recv ms, event ms, side, price, qty, update id); `book`: the bids and asks of
+    the `book_l20` row at 1 s, (price, qty) each."""
     quality = quality or [(0, "connected", "conn=1"), (1, "synced", "update_id=1")]
     depth_rows = [(500 * MS, 400 * MS, 1, 1, 1, 100, 10)]
     depth_rows += [(r * MS, e * MS, u, u, s, p, q) for r, e, s, p, q, u in depth]
@@ -53,7 +54,7 @@ def market(trades=(), depth=(), quality=None, extra_tickers=()):
     frames_ = synth.tables(
         depth_diff=depth_rows,
         trades=trade_rows,
-        book_l20=[l20(1 * S, 1, [(100, 10), (99, 5)], [(101, 10), (102, 5)])],
+        book_l20=[l20(1 * S, 1, *(book or ([(100, 10), (99, 5)], [(101, 10), (102, 5)])))],
         book_ticker=[(900 * MS, 1, 100, 10, 101, 10), *extra_tickers],
         quality=quality,
     )
@@ -163,6 +164,47 @@ def test_an_order_that_would_cross_is_rejected():
     m = market()
     assert one(m, buy(price=101)).outcome == Outcome.REJECTED
     assert one(m, buy(side=ASK, price=100)).outcome == Outcome.REJECTED
+
+
+#: Twenty bid levels, 100 down to 81: a bid at 70 is deeper than the book shows.
+DEEP = ([(100 - i, 1) for i in range(20)], [(101 + i, 1) for i in range(20)])
+
+
+def test_a_level_the_book_does_not_show_is_unknown_unless_asked_to_rest_behind():
+    m = market(book=DEEP, trades=[(1200, 1150, 70, 4, True)])
+    r = one(m, buy(price=70))
+    assert (r.outcome, r.final, r.queue_at_arrival) == (Outcome.UNKNOWN, 1100 * MS, None)
+    with pytest.raises(ValueError, match="unseen"):
+        simulate(m, [buy(price=70)], LAT, unseen="ahead")
+
+
+def test_behind_an_unseen_level_trades_reach_the_order_only_after_the_level_shows():
+    m = market(
+        book=DEEP,
+        depth=[(1500, 1450, 1, 70, 3, 2)],  # the level shows 3 after the trade of 4
+        trades=[
+            (1200, 1150, 70, 4, True),  # before the level is seen: all ahead of us
+            (1600, 1440, 70, 2, True),  # part of the update, received after it: still ahead
+            (1700, 1650, 70, 4, True),  # 3 ahead used up, 1 for us
+            (1800, 1750, 69, 1, True),  # through the price: the rest
+        ],
+    )
+    for mode in Mode:
+        r = simulate(m, [buy(price=70)], LAT, mode, unseen="behind")[0]
+        assert r.queue_at_arrival is None
+        assert r.fills == [(1700 * MS, 70, 1), (1800 * MS, 70, 4)], mode
+        assert (r.outcome, r.final) == (Outcome.FILLED, 1800 * MS)
+
+
+def test_behind_an_unseen_level_a_trade_through_the_price_still_fills():
+    m = market(book=DEEP, trades=[(1200, 1150, 70, 9, True), (1300, 1250, 69, 1, True)])
+    r = simulate(m, [buy(price=70)], LAT, unseen="behind")[0]
+    assert r.fills == [(1300 * MS, 70, 5)]
+    quiet = simulate(market(book=DEEP), [buy(price=70)], LAT, unseen="behind")[0]
+    assert (quiet.outcome, quiet.fills) == (Outcome.CANCELLED, [])
+    # a level the book shows is unaffected by the option
+    seen = market(trades=[(1200, 1150, 100, 12, True)])
+    assert simulate(seen, [buy()], LAT, unseen="behind") == simulate(seen, [buy()], LAT)
 
 
 def test_a_hole_ends_what_can_be_known():
