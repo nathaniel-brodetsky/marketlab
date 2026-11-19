@@ -1,0 +1,276 @@
+{
+ "id": "004",
+ "name": "vpin-vol",
+ "kind": "volatility",
+ "hypothesis": "VPIN (Easley, Lopez de Prado, O'Hara 2012) adds to HAR in forecasting the log realized volatility of the mid over the next 10 seconds: it lowers HAR's out-of-sample squared error, beyond what it does shifted in time. Andersen and Bondarenko found its forecasting power comes from its link to volume and volatility; HAR here already holds recent volatility, so the expectation is that it adds nothing.",
+ "spec": "004-vpin-vol.yaml",
+ "spec_commit": "1c910251ed95fa45f7135d2673b34cb0dde99783",
+ "head": "d3c43c84eddc0f0473072c46cbd93379f47da7d6",
+ "dirty": false,
+ "marketlab": "0.1.0",
+ "run_at": "2026-11-19T06:26:23+00:00",
+ "data": {
+  "symbol": "BTCUSDT",
+  "days": [
+   {
+    "date": "2025-03-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-04-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-05-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-06-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-07-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-08-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-09-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-10-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2025-11-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2025-12-01",
+    "usable_hours": 23.999
+   },
+   {
+    "date": "2026-01-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-02-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-03-01",
+    "usable_hours": 23.998
+   },
+   {
+    "date": "2026-04-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-05-01",
+    "usable_hours": 24.0
+   },
+   {
+    "date": "2026-06-01",
+    "usable_hours": 23.989
+   },
+   {
+    "date": "2026-07-01",
+    "usable_hours": 23.998
+   }
+  ],
+  "skipped": [
+   {
+    "date": "2026-11-17",
+    "usable_hours": 0.312
+   }
+  ],
+  "holdout": [
+   "2026-08-01",
+   "2026-09-01",
+   "2026-10-01",
+   "2026-11-01"
+  ]
+ },
+ "feature": "vpin(buckets_per_day=1000,window=50)",
+ "target": {
+  "horizon": "10s",
+  "floor_bp": 0.1,
+  "sampling": "10s"
+ },
+ "by_day": {
+  "2025-03-01": {
+   "mse_persistence": 1.756785687674651,
+   "mse_har": 1.1058901574841145,
+   "mse_candidate": 1.1026568822782228,
+   "gain": 0.002923685669874554,
+   "rows": 7797
+  },
+  "2025-04-01": {
+   "mse_persistence": 1.7408230053415361,
+   "mse_har": 1.0133419874659133,
+   "mse_candidate": 1.0129400849818306,
+   "gain": 0.0003966109063414658,
+   "rows": 7916
+  },
+  "2025-05-01": {
+   "mse_persistence": 2.0582426820412345,
+   "mse_har": 1.2854646786541624,
+   "mse_candidate": 1.2824370807947232,
+   "gain": 0.002355255581669491,
+   "rows": 7828
+  },
+  "2025-06-01": {
+   "mse_persistence": 2.131714303538543,
+   "mse_har": 1.352860705985307,
+   "mse_candidate": 1.3537767953013882,
+   "gain": -0.0006771497701338891,
+   "rows": 7694
+  },
+  "2025-07-01": {
+   "mse_persistence": 1.8739775911283458,
+   "mse_har": 1.1626161276267677,
+   "mse_candidate": 1.1716729138661772,
+   "gain": -0.007790005681322265,
+   "rows": 4545
+  },
+  "2025-08-01": {
+   "mse_persistence": 1.5867076713692847,
+   "mse_har": 0.9566527097617643,
+   "mse_candidate": 0.9549543448504949,
+   "gain": 0.00177532023266036,
+   "rows": 8362
+  },
+  "2025-09-01": {
+   "mse_persistence": 1.827860976266075,
+   "mse_har": 1.0788254096901981,
+   "mse_candidate": 1.0770150418083344,
+   "gain": 0.00167809162224275,
+   "rows": 7405
+  },
+  "2025-10-01": {
+   "mse_persistence": 1.890231956074709,
+   "mse_har": 1.1725727212389863,
+   "mse_candidate": 1.1729541511299473,
+   "gain": -0.00032529316438290046,
+   "rows": 7773
+  },
+  "2025-11-01": {
+   "mse_persistence": 1.5527274986779402,
+   "mse_har": 1.0629843342811882,
+   "mse_candidate": 1.0637845398424761,
+   "gain": -0.0007527914904117416,
+   "rows": 7441
+  },
+  "2025-12-01": {
+   "mse_persistence": 1.4056986186534375,
+   "mse_har": 0.8270294104196904,
+   "mse_candidate": 0.8238626538944034,
+   "gain": 0.0038290736525076197,
+   "rows": 8487
+  },
+  "2026-01-01": {
+   "mse_persistence": 1.4436449716579973,
+   "mse_har": 1.4205723911570918,
+   "mse_candidate": 1.4363463675635806,
+   "gain": -0.01110395816832721,
+   "rows": 7042
+  },
+  "2026-02-01": {
+   "mse_persistence": 1.4530670547428273,
+   "mse_har": 0.9184945660295446,
+   "mse_candidate": 0.9159625769716178,
+   "gain": 0.002756672877088473,
+   "rows": 8445
+  },
+  "2026-03-01": {
+   "mse_persistence": 2.0040038431007137,
+   "mse_har": 1.2354761965736283,
+   "mse_candidate": 1.238478158672154,
+   "gain": -0.0024298016480213125,
+   "rows": 7843
+  },
+  "2026-04-01": {
+   "mse_persistence": 1.7816609628588889,
+   "mse_har": 1.0526622657477556,
+   "mse_candidate": 1.055216937910478,
+   "gain": -0.0024268678054188975,
+   "rows": 8071
+  },
+  "2026-05-01": {
+   "mse_persistence": 2.1376492613143125,
+   "mse_har": 1.305652360642939,
+   "mse_candidate": 1.300376522122457,
+   "gain": 0.004040768185709198,
+   "rows": 7923
+  },
+  "2026-06-01": {
+   "mse_persistence": 1.7727780619636955,
+   "mse_har": 1.0921965518276626,
+   "mse_candidate": 1.087970806218801,
+   "gain": 0.00386903401387817,
+   "rows": 3947
+  },
+  "2026-07-01": {
+   "mse_persistence": 1.7064844580586058,
+   "mse_har": 1.0574264412713619,
+   "mse_candidate": 1.05818492915274,
+   "gain": -0.000717296117984656,
+   "rows": 7953
+  }
+ },
+ "mean_gain": -0.00015286182964887007,
+ "se": 0.0009977963275303397,
+ "positive_share": 0.5294117647058824,
+ "mean_gain_over_persistence": 0.3615645337193298,
+ "surrogates": {
+  "shift": {
+   "n": 200,
+   "percentile": 95.0,
+   "threshold": 0.0009777665747722753,
+   "real": -0.00015286182964887007,
+   "p": 0.6716417910447762,
+   "mean": 0.00010979349952387456
+  }
+ },
+ "pbo": {
+  "pbo": 0.16845376845376844,
+  "combinations": 12870,
+  "median_logit": 1.0986122886681098
+ },
+ "variants": {
+  "vpin(buckets_per_day=500,window=50)": -0.00036065280114329926,
+  "vpin(buckets_per_day=1000,window=50)": -0.00015286182964887007,
+  "vpin(buckets_per_day=2000,window=50)": 0.0008519414045890223
+ },
+ "stability": {
+  "time_of_day": {
+   "00-06 UTC": 0.0006751644538508517,
+   "06-12 UTC": -0.0016422126727635433,
+   "12-18 UTC": 0.0001442623370996321,
+   "18-24 UTC": 0.00047692086840500636
+  },
+  "volatility_tercile": {
+   "low": -0.0019086602409781328,
+   "middle": 0.00036224931547401695,
+   "high": 0.0014387210059536581
+  }
+ },
+ "diagnostics": {},
+ "vpin_bucket_base_units": {
+  "vpin(buckets_per_day=500,window=50)": 38.771956280373416,
+  "vpin(buckets_per_day=1000,window=50)": 19.385978140186708,
+  "vpin(buckets_per_day=2000,window=50)": 9.692989070093354
+ },
+ "p_raw": 0.559921759387908,
+ "p_bh": 0.746562345850544,
+ "verdict": "failed",
+ "reasons": [
+  "mean gain over HAR -0.0002 is not above 0.0",
+  "p after Benjamini-Hochberg 0.747 is not below 0.05",
+  "not above the 95th percentile of shifted features",
+  "positive on 53% of days, the hypothesis asks for 60%"
+ ]
+}
