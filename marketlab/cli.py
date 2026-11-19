@@ -576,6 +576,36 @@ def _wide() -> pl.Config:
     )  # fmt: skip
 
 
+def cmd_archive_check(a: argparse.Namespace) -> int:
+    from . import archive
+
+    days = archive.find(a.root, a.symbol.upper(), a.kind, a.market)
+    if not days:
+        raise ContractError(
+            f"no {a.symbol.upper()} {a.kind} files under {Path(a.root) / a.market / a.kind}"
+        )
+    result = archive.check(days)
+    units = sorted({d.unit for d in result.days})
+    print(
+        f"archive     {a.symbol.upper()} {a.market} {a.kind}: {len(days)} days, "
+        f"{days[0].date} .. {days[-1].date}; times in {', '.join(units)}"
+    )
+    with _wide():
+        print(archive.table(result))
+    rows = sum(d.rows for d in result.days)
+    trades = sum(d.trades for d in result.days)
+    print(f"rows        {rows:,} ({trades:,} raw trades)")
+    if result.missing_dates:
+        print(f"MISSING     {', '.join(result.missing_dates)}")
+    for b in result.breaks:
+        print(f"BREAK       {b}")
+    bad = [d for d in result.days if d.problems]
+    for d in bad:
+        print(f"PROBLEM     {d.date}: {'; '.join(d.problems)}")
+    print("verdict     " + ("ok" if result.ok else "problems above: fix or leave those days out"))
+    return 0 if result.ok else 1
+
+
 def cmd_synth(a: argparse.Namespace) -> int:
     s = synth.Scenario(
         seed=a.seed,
@@ -688,6 +718,17 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
     g.add_argument("--out", help="per-day table to this .csv or .parquet file")
     g.set_defaults(run=cmd_strategy)
+
+    r = sub.add_parser(
+        "archive", help="Binance public trade archives from scripts/fetch_binance.py"
+    )
+    rs = r.add_subparsers(dest="action", required=True)
+    rc = rs.add_parser("check", help="integrity of the downloaded days, before any research")
+    rc.add_argument("root", nargs="?", default="binance-data", help="default ./binance-data")
+    rc.add_argument("--symbol", default="BTCUSDT")
+    rc.add_argument("--kind", default="aggTrades", choices=["aggTrades", "trades"])
+    rc.add_argument("--market", default="spot", choices=["spot", "um", "cm"])
+    rc.set_defaults(run=cmd_archive_check)
 
     s = sub.add_parser("synth", help="write a synthetic day to try the commands")
     s.add_argument("out", help="data root, e.g. /tmp/synth")

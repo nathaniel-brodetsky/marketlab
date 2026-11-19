@@ -50,6 +50,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab strategy --data ROOT [--offsets 0 1 2] [--signal 1s] [--threshold 1] [--life 10s] [--max-position 5] [--modes ...] [--fees ...] [--by-day] [--workers N] [--out FILE]` | a market-making rule quoting both sides through the fill simulator, day by day: P&L before fees, what the fills captured against the mid and what the position lost, the maker fee at which it breaks even, net P&L at given fees |
 | `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, a `maker` rule or a `volatility` forecast) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
 | `marketlab experiment list` | every hypothesis, run or only written, with its verdict and its p-value adjusted for all of them as they stand |
+| `marketlab archive check [ROOT]` | integrity of Binance trade archives downloaded with `scripts/fetch_binance.py`: missing ids and trades, times, gaps between days |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
 
 `--late` keeps the intervals in which the data arrived late (see below).
@@ -469,6 +470,13 @@ on any machine with Python 3.9 or newer. The archives hold trades without the or
 enough for hypotheses on trades alone (intensity, VPIN, volatility, trade clocks), not for
 order-flow imbalance or the fill simulator. Spot timestamps are in microseconds from
 2025-01-01, in milliseconds before.
+
+`marketlab archive check [binance-data]` then checks the downloaded days before any
+research touches them, without looking at returns: aggregate ids that skip, raw trade ids
+an aggregate range does not reach, times out of order or outside their day, empty rows,
+the longest silence, dates missing from the range and ids that do not continue from one
+day to the next. Exit code 1 when anything is wrong. `marketlab/archive.py` reads the zips
+(with or without a header line, either time unit) into frames with times in nanoseconds.
 
 ## Tests
 
