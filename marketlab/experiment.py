@@ -651,9 +651,11 @@ def _registry(results: Path) -> list[dict]:
         if f.name.endswith(".holdout.json"):
             continue
         try:
-            out.append(json.loads(f.read_text()))
+            record = json.loads(f.read_text())
         except json.JSONDecodeError:
             continue
+        if isinstance(record, dict) and "id" in record and "name" in record:
+            out.append(record)  # anything else in results/ is not a hypothesis's record
     return out
 
 

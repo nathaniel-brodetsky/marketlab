@@ -252,11 +252,53 @@ def print_report(r) -> None:
 
 
 def kind_of(spec_path: Path) -> str:
-    """A hypothesis's kind: `forecast` (the default), `maker` or `volatility`."""
+    """A hypothesis's kind: `forecast` (the default), `maker`, `volatility` or `tradeflow`."""
     import yaml
 
     raw = yaml.safe_load(spec_path.read_text())
     return str(raw.get("kind", "forecast")) if isinstance(raw, dict) else "forecast"
+
+
+def print_tradeflow_report(r) -> None:
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    s = r.spec
+    print(f"experiment  {s.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    span = f"{r.days[0]} .. {r.days[-1]}" if r.days else "none"
+    print(
+        f"days        {len(r.days)} development, {span}; "
+        f"held out: {s.holdout[0]} .. {s.holdout[-1]} ({len(s.holdout)})"
+        if s.holdout
+        else f"days        {len(r.days)}, {span}"
+    )
+    if r.missing:
+        print(f"missing     {', '.join(r.missing)}")
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    print(
+        f"feature     signed volume over {s.primary.text}; target: return over {s.horizon}, "
+        f"every {s.sampling}"
+    )
+    m = r.summary
+    print(
+        f"IC          {m.mean:.4f} +- {m.se:.4f} (mean of days), p {m.p:.2g}, "
+        f"positive on {m.positive_share:.0%} of {m.days} days"
+    )
+    for kind, x in r.surrogate.items():
+        print(
+            f"surrogates  {kind:<6} {x['percentile']:g}th percentile of {x['n']}: "
+            f"{x['threshold']:.4f}, p {x['p']:.3g}"
+        )
+    if r.pbo:
+        print(f"pbo         {r.pbo.pbo:.2f} over {len(s.variants)} variants")
+    for name, v in r.variants.items():
+        print(f"variant     {name}: {v:.4f}" if v is not None else f"variant     {name}: -")
+    for label, part in r.stability.items():
+        cells = ", ".join(f"{k} {v:.3f}" if v is not None else f"{k} -" for k, v in part.items())
+        print(f"stability   {label.replace('_', ' ')}: {cells}")
+    print(f"p (BH)      {r.p_bh:.3g} over every hypothesis written")
+    print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
 
 
 def print_maker_report(r) -> None:
@@ -407,6 +449,31 @@ def cmd_experiment_run(a: argparse.Namespace) -> int:
             return 0
         report = volatility.run(spec, a.data, results, cache, workers=a.workers)
         print_volatility_report(report)
+        print(f"written     {results / (spec.slug + '.json')}")
+        return 0
+    if kind == "tradeflow":
+        from . import tradeflow
+
+        spec = tradeflow.load_spec(spec_path)
+        results = _repo_dir(spec_path, "results", a.results)
+        cache = _repo_dir(spec_path, ".cache", a.cache)
+        if a.final:
+            rec = tradeflow.final(spec, a.data, results, cache)
+            m = rec["summary"]
+            print(f"held out    {', '.join(rec['days'])}: opened once, now recorded")
+            if rec["missing"]:
+                print(f"missing     {', '.join(rec['missing'])}")
+            print(
+                f"IC          {m['mean']:.4f} +- {m['se']:.4f}, p {m['p']:.2g}, "
+                f"positive on {m['positive_share']:.0%} of days"
+                if m["mean"] is not None
+                else "IC          -"
+            )
+            for d, ic in rec["ic_by_day"].items():
+                print(f"            {d}: {ic:.4f}" if ic is not None else f"            {d}: -")
+            return 0
+        report = tradeflow.run(spec, a.data, results, cache, workers=a.workers)
+        print_tradeflow_report(report)
         print(f"written     {results / (spec.slug + '.json')}")
         return 0
     if kind == "maker":

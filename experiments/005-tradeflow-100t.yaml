@@ -1,0 +1,47 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+# Written before any of these days was analysed: only `marketlab archive check` had read
+# them, for missing ids and times, never for returns.
+id: "005"
+name: tradeflow-100t
+kind: tradeflow
+hypothesis: >
+  Signed taker volume, aggressive buys minus aggressive sells, over the last 100 aggregate
+  trades of BTCUSDT spot has a positive rank correlation with the log return of the trade
+  price over the next 30 seconds, beyond what the same computation finds with the two
+  misaligned in time (surrogates), and keeps it on the held-out days.
+
+data:
+  kind: aggTrades        # downloaded with scripts/fetch_binance.py, checked with `archive check`
+  market: spot
+  symbol: BTCUSDT
+  days: {from: 2026-09-01, to: 2026-10-28}      # development: 58 days
+  holdout: {from: 2026-10-29, to: 2026-11-18}   # 21 days, opened once, at the end
+  min_days: 40
+
+sampling: 5s             # a grid row every 5 s, between each day's first and last trade
+
+feature:
+  method: signed_volume
+  params: {window: 100t} # the last 100 aggregate trades; `5s` would be the last 5 seconds
+
+variants:                # the same hypothesis with other windows, for PBO
+  - {window: 25t}
+  - {window: 50t}
+  - {window: 100t}
+  - {window: 250t}
+  - {window: 1s}
+  - {window: 5s}
+  - {window: 30s}
+
+target: {kind: return, horizon: 30s}   # log return of the last trade price
+
+protocol:
+  surrogates: 200        # of each kind: block, iaaft, shift
+  seed: 5
+
+success:
+  min_ic: 0.0            # mean rank IC over the development days must be above
+  alpha: 0.05            # one-sided p after Benjamini-Hochberg over every hypothesis written
+  surrogate_percentile: 95
+  max_pbo: 0.5
+  min_positive_days: 0.6

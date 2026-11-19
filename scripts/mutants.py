@@ -648,6 +648,30 @@ M = [
         "return min(bid, int(np.ceil(mid * (1 - offset_bp / 1e4))))",
         "a bid away from the mid rounded towards it",
     ),
+    (
+        "marketlab/tradeflow.py",
+        'upto = np.searchsorted(ts, grid, side="right")  # trades at or before each time',
+        'upto = np.searchsorted(ts, grid + every, side="right")',
+        "the trade flow reads the trades of the next interval",
+    ),
+    (
+        "marketlab/tradeflow.py",
+        "first = upto - w.trades\n",
+        "first = upto - w.trades + 1\n",
+        "a trade-count window one trade short",
+    ),
+    (
+        "marketlab/tradeflow.py",
+        "x = np.where(grid - w.ns >= lo, cum[upto] - cum[since], np.nan)",
+        "x = cum[upto] - cum[since]",
+        "a time window kept before the day's first trade",
+    ),
+    (
+        "marketlab/tradeflow.py",
+        'cols["target"] = np.where(grid + horizon <= hi, later - now, np.nan)',
+        'cols["target"] = np.where(grid + horizon <= hi + horizon, later - now, np.nan)',
+        "a target past the day's last trade",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

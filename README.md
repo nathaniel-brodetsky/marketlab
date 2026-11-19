@@ -478,6 +478,22 @@ the longest silence, dates missing from the range and ids that do not continue f
 day to the next. Exit code 1 when anything is wrong. `marketlab/archive.py` reads the zips
 (with or without a header line, either time unit) into frames with times in nanoseconds.
 
+### Hypotheses on the archives: `kind: tradeflow`
+
+`experiments/005-tradeflow-100t.yaml` is the first: does signed taker volume, aggressive
+buys minus sells over the last 100 aggregate trades, forecast the trade price's return over
+the next 30 seconds? `marketlab experiment run experiments/005-tradeflow-100t.yaml --data
+binance-data` runs it on the development days the spec names; `--final` opens its held-out
+days, once. The windows are counts of aggregate trades (`100t`) or times (`5s`); the grid
+is every `sampling` between each day's first and last trade. The feature has no fitted
+parameters and a sign fixed by the hypothesis, so every development day is out of sample
+for it; the choice between windows is what PBO measures. Otherwise the protocol is the
+forecast one: rank IC by day with Newey-West errors inside the day, three kinds of
+surrogates, Benjamini-Hochberg over every hypothesis written, stability by time of day and
+by the last minute's move. `tests/test_tradeflow.py` works the flow and the target out by
+hand, cuts a day to show the flow reads nothing after its time, and finds a planted effect
+and not its absence.
+
 ## Tests
 
 ```bash
