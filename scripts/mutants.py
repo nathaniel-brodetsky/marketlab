@@ -672,6 +672,24 @@ M = [
         'cols["target"] = np.where(grid + horizon <= hi + horizon, later - now, np.nan)',
         "a target past the day's last trade",
     ),
+    (
+        "marketlab/screen.py",
+        'sec_upto = np.searchsorted(seconds, grid, side="right")',
+        'sec_upto = np.searchsorted(seconds, grid + SEC, side="right")',
+        "realized volatility reads the next second",
+    ),
+    (
+        "marketlab/screen.py",
+        'x = part["buy_qty"] / part["buy_n"] - part["sell_qty"] / part["sell_n"]',
+        'x = part["sell_qty"] / part["sell_n"] - part["buy_qty"] / part["buy_n"]',
+        "size skew the wrong way round",
+    ),
+    (
+        "marketlab/screen.py",
+        'if all(x["real"] is not None and x["real"] > x["threshold"] for x in sur.values()):',
+        "if True:",
+        "the screen takes a signal its surrogates refuse",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

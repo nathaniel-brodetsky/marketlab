@@ -252,11 +252,44 @@ def print_report(r) -> None:
 
 
 def kind_of(spec_path: Path) -> str:
-    """A hypothesis's kind: `forecast` (the default), `maker`, `volatility` or `tradeflow`."""
+    """A hypothesis's kind: `forecast` (the default), `maker`, `volatility`, `tradeflow` or
+    `screen`."""
     import yaml
 
     raw = yaml.safe_load(spec_path.read_text())
     return str(raw.get("kind", "forecast")) if isinstance(raw, dict) else "forecast"
+
+
+def print_screen_report(r) -> None:
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    s = r.spec
+    print(f"experiment  {s.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    span = f"{r.days[0]} .. {r.days[-1]}" if r.days else "none"
+    print(
+        f"days        {len(r.days)} development, {span}; "
+        f"held out: {s.holdout[0]} .. {s.holdout[-1]} ({len(s.holdout)})"
+    )
+    if r.missing:
+        print(f"missing     {', '.join(r.missing)}")
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    print(f"grid        {len(s.combos)} combinations, every {s.sampling}; rank IC by day")
+    t = pl.DataFrame(r.table).sort("mean_ic", descending=True, nulls_last=True)
+    with _wide():
+        print(t.with_columns(pl.col(pl.Float64).round(4)))
+    if r.pbo:
+        print(f"pbo         {r.pbo.pbo:.2f} over the whole grid")
+    for c in r.passed_over:
+        print(f"refused     {c['combination']}: not above its surrogates")
+    for k, c in enumerate(r.chosen, 1):
+        sur = ", ".join(f"{kind} {x['threshold']:.4f}" for kind, x in c["surrogates"].items())
+        print(
+            f"chosen {k}    {c['combination']}: IC {c['mean_ic']:.4f}, positive on "
+            f"{c['positive_days']:.0%} of days; surrogates' {s.surrogate_percentile:g}th: {sur}"
+        )
+    print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
 
 
 def print_tradeflow_report(r) -> None:
@@ -449,6 +482,30 @@ def cmd_experiment_run(a: argparse.Namespace) -> int:
             return 0
         report = volatility.run(spec, a.data, results, cache, workers=a.workers)
         print_volatility_report(report)
+        print(f"written     {results / (spec.slug + '.json')}")
+        return 0
+    if kind == "screen":
+        from . import screen
+
+        spec = screen.load_spec(spec_path)
+        results = _repo_dir(spec_path, "results", a.results)
+        cache = _repo_dir(spec_path, ".cache", a.cache)
+        if a.final:
+            rec = screen.final(spec, a.data, results, cache, workers=a.workers)
+            print(f"held out    {', '.join(rec['days'])}: opened once, now recorded")
+            for c in rec["chosen"]:
+                ic = c["mean_ic"]
+                print(
+                    f"            {c['combination']}: IC {ic:.4f} +- {c['se']:.4f}, "
+                    f"p (BH over {len(rec['chosen'])}) {c['p_bh']:.3g}, positive on "
+                    f"{c['positive_days']:.0%} of days: "
+                    + ("confirmed" if c["confirmed"] else "not confirmed")
+                    if ic is not None
+                    else f"            {c['combination']}: -"
+                )
+            return 0
+        report = screen.run(spec, a.data, results, cache, workers=a.workers)
+        print_screen_report(report)
         print(f"written     {results / (spec.slug + '.json')}")
         return 0
     if kind == "tradeflow":

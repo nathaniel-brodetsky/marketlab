@@ -494,6 +494,21 @@ by the last minute's move. `tests/test_tradeflow.py` works the flow and the targ
 hand, cuts a day to show the flow reads nothing after its time, and finds a planted effect
 and not its absence.
 
+### Many signals as one hypothesis: `kind: screen`
+
+`experiments/006-screen-trades.yaml` tries 44 combinations of a trade-only signal and a
+target at once (signed volume and order count, size skew; trade intensity, volume rate,
+realized volatility, Hawkes intensity; returns and their size over 5 s to 5 min) and
+counts them as one hypothesis. The development run scores every combination, measures
+PBO over the whole grid, and applies the rule written in the spec blindly: the best by
+mean IC that are positive on enough days and beat their surrogates, until it has the
+number it should take. Its verdict is then `screened` (or `failed`); the claim itself is
+decided by `--final`, which scores only the chosen ones on the held-out days, once, with
+Benjamini-Hochberg over them. Until then the screen counts at p = 1 in the family.
+`tests/test_screen.py` works every signal out by hand, cuts days to show none reads a
+trade after its time (Hawkes included), takes a planted signal, refuses noise, and passes
+over a signal its surrogates refuse.
+
 ## Tests
 
 ```bash

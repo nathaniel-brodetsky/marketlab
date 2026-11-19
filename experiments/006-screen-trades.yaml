@@ -1,0 +1,50 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+# Written before any of these days was analysed for this grid and before the held-out days
+# of 005 were opened. One hypothesis for the whole grid, so that every combination tried
+# is counted.
+id: "006"
+name: screen-trades
+kind: screen
+hypothesis: >
+  Among the trade-only signals below, the three best by mean rank IC on the development
+  days, chosen by the rule written here, keep a positive IC on the held-out days; and the
+  grid as a whole is not overfit (PBO at most 0.5 across every combination).
+
+data:
+  kind: aggTrades
+  market: spot
+  symbol: BTCUSDT
+  days: {from: 2026-09-01, to: 2026-10-28}      # the same development days as 005
+  holdout: {from: 2026-10-29, to: 2026-11-18}   # opened once, for the three chosen only
+  min_days: 40
+  confirm: december      # then once more on December, not recorded yet: a hypothesis of its own
+
+sampling: 5s
+
+grid:
+  direction:             # signed signals against the return over the horizon
+    targets: [return_5s, return_30s, return_5m]
+    signals:
+      - {method: signed_volume, windows: [25t, 100t, 5s, 30s, 5m]}
+      - {method: signed_count, windows: [100t, 30s, 5m]}   # buy orders minus sell orders
+      - {method: size_skew, windows: [100t, 5m]}           # mean buy size minus mean sell size
+  activity:              # unsigned signals against the size of the move over the horizon
+    targets: [abs_return_30s, abs_return_5m]
+    signals:
+      - {method: intensity, windows: [30s, 5m]}            # aggregate trades per second
+      - {method: volume_rate, windows: [30s, 5m]}          # base units per second
+      - {method: realized_vol, windows: [1m, 5m]}          # of the trade price, each second
+      - {method: hawkes, params: {window: 10m, step: 5m}}
+
+selection:               # written now, applied blindly after the development run
+  rank_by: mean_ic
+  require: {positive_days: 0.6, surrogates_above: 95}
+  take: 3
+
+protocol:
+  surrogates: 200
+  seed: 6
+
+success:
+  max_pbo: 0.5           # over all 44 combinations: 10 signals x 3 horizons, 7 x 2
+  alpha: 0.05            # each of the three on the held-out days, Benjamini-Hochberg over three
