@@ -450,7 +450,7 @@ def cmd_experiment_run(a: argparse.Namespace) -> int:
 def cmd_experiment_list(a: argparse.Namespace) -> int:
     from . import experiment as ex
 
-    table = ex.registry_table(Path(a.results))
+    table = ex.registry_table(Path(a.results), Path(a.experiments))
     with pl.Config(tbl_rows=-1, tbl_cols=-1, tbl_width_chars=200, float_precision=4):
         print(table)
     return 0
@@ -522,6 +522,7 @@ def parser() -> argparse.ArgumentParser:
     xr.set_defaults(run=cmd_experiment_run)
     xl = xs.add_parser("list", help="every recorded hypothesis, with p adjusted for all")
     xl.add_argument("--results", default="results")
+    xl.add_argument("--experiments", default="experiments")
     xl.set_defaults(run=cmd_experiment_list)
 
     s = sub.add_parser("synth", help="write a synthetic day to try the commands")

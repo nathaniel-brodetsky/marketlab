@@ -48,7 +48,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
 | `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, a `maker` rule or a `volatility` forecast) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
-| `marketlab experiment list` | every recorded hypothesis with its verdict and its p-value adjusted for all of them |
+| `marketlab experiment list` | every hypothesis, run or only written, with its verdict and its p-value adjusted for all of them as they stand |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
 
 `--late` keeps the intervals in which the data arrived late (see below).
@@ -268,8 +268,9 @@ be compared with each other.
    each. The random numbers depend only on the seed, so the surrogates come out the same
    on any number of processes.
 4. **Multiple tests.** Benjamini-Hochberg over every hypothesis in `results/`, failed ones
-   included; the probability of backtest overfitting (CSCV) over the hypothesis's variants;
-   the deflated Sharpe ratio for trading rules.
+   included, and every one written in `experiments/` but not run yet, at p = 1: a verdict
+   cannot gain from being run before the others. The probability of backtest overfitting
+   (CSCV) over the hypothesis's variants; the deflated Sharpe ratio for trading rules.
 5. **Costs.** A trading rule is judged through the fill simulator, with the pessimistic
    queue. (No trading rule has been written down yet.)
 6. **Stability.** The IC by day, by six hours of the day and by the volatility of the

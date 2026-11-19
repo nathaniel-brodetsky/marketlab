@@ -142,6 +142,29 @@ def test_the_registry_adjusts_every_hypothesis_together(tmp_path, planted):
     assert old["p_bh"][0] == pytest.approx(min(0.04 * 3 / 2, 1.0))
 
 
+def test_a_hypothesis_written_but_not_run_counts_at_p_one(tmp_path):
+    # two hypotheses written before either runs: whichever runs first is adjusted for the
+    # other at p = 1, so running first never helps; the list shows the unrun one too
+    exp, results = tmp_path / "experiments", tmp_path / "results"
+    first = spec_file(tmp_path)
+    spec_file(tmp_path, SPEC.replace('id: "007"', 'id: "008"'), name="008-planted.yaml")
+    spec = ex.load_spec(first)
+    assert ex._bh_with_registry(results, spec, 0.03) == pytest.approx(0.03 * 2)
+    results.mkdir()
+    (results / "008-planted.json").write_text(
+        json.dumps({"id": "008", "name": "planted", "verdict": "failed", "p_raw": 0.5})
+    )
+    assert ex._bh_with_registry(results, spec, 0.03) == pytest.approx(0.03 * 2 / 1)
+    (results / "008-planted.json").write_text(
+        json.dumps({"id": "008", "name": "planted", "verdict": "passed", "p_raw": 0.01})
+    )
+    assert ex._bh_with_registry(results, spec, 0.03) == pytest.approx(0.03)
+    (results / "008-planted.json").unlink()
+    table = ex.registry_table(results, exp)
+    assert table.sort("id")["verdict"].to_list() == ["not run", "not run"]
+    assert ex.written(exp) == {"007-planted": "007-planted.yaml", "008-planted": "008-planted.yaml"}
+
+
 def test_surrogates_do_not_depend_on_the_number_of_workers(tmp_path, planted):
     planted(fake_days(8, signal=0.1, seed=4))
     spec = ex.load_spec(spec_file(tmp_path))

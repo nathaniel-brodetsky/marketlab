@@ -586,6 +586,12 @@ M = [
         "    lam_before, _ = hk.at_times(r, ts, side, query, step)",
         "the intensity's change measured against itself",
     ),
+    (
+        "marketlab/experiment.py",
+        "            out.setdefault(slug, 1.0)",
+        "            pass",
+        "a hypothesis run first is adjusted only for those run before it",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

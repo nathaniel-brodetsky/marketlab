@@ -657,10 +657,38 @@ def _registry(results: Path) -> list[dict]:
     return out
 
 
-def _bh_with_registry(results: Path, spec: Spec, p: float) -> float:
-    """This hypothesis's p-value adjusted with every other one in the registry."""
-    others = [r.get("p_raw") for r in _registry(results) if f"{r['id']}-{r['name']}" != spec.slug]
-    ps = np.array([x if x is not None else 1.0 for x in others] + [p if np.isfinite(p) else 1.0])
+def written(experiments: Path) -> dict[str, str]:
+    """Every hypothesis file in `experiments/`: its `id-name` and file name."""
+    out = {}
+    if experiments.is_dir():
+        for f in sorted(experiments.glob("*.yaml")):
+            try:
+                raw = yaml.safe_load(f.read_text())
+            except yaml.YAMLError:
+                continue
+            if isinstance(raw, dict) and "id" in raw and "name" in raw:
+                out[f"{raw['id']}-{raw['name']}"] = f.name
+    return out
+
+
+def family(results: Path, experiments: Path | None) -> dict[str, float]:
+    """The p-value of every hypothesis: those recorded in `results/`, and those written in
+    `experiments/` but not run yet, at 1. Counting the unrun ones keeps a verdict from
+    depending on the order the hypotheses are run in: running first never helps."""
+    out = {
+        f"{r['id']}-{r['name']}": (r["p_raw"] if r.get("p_raw") is not None else 1.0)
+        for r in _registry(results)
+    }
+    if experiments is not None:
+        for slug in written(experiments):
+            out.setdefault(slug, 1.0)
+    return out
+
+
+def _bh_with_registry(results: Path, spec, p: float) -> float:
+    """This hypothesis's p-value adjusted with every other one written or recorded."""
+    others = [q for slug, q in family(results, spec.path.parent).items() if slug != spec.slug]
+    ps = np.array([*others, p if np.isfinite(p) else 1.0])
     return float(benjamini_hochberg(ps)[-1])
 
 
@@ -670,9 +698,16 @@ def _finish(report: Report, results: Path) -> Report:
     return report
 
 
-def registry_table(results: Path) -> pl.DataFrame:
-    """Every recorded hypothesis with its verdict and its p-value adjusted for all of them."""
+def registry_table(results: Path, experiments: Path | None = None) -> pl.DataFrame:
+    """Every recorded hypothesis with its verdict and its p-value adjusted for all of them;
+    with `experiments`, the ones written but not run too, as `not run` at p = 1."""
     rows = _registry(results)
+    if experiments is not None:
+        seen = {f"{r['id']}-{r['name']}" for r in rows}
+        for slug in written(experiments):
+            if slug not in seen:
+                id_, name = slug.split("-", 1)
+                rows.append({"id": id_, "name": name, "verdict": "not run", "p_raw": None})
     if not rows:
         return pl.DataFrame(
             schema={
