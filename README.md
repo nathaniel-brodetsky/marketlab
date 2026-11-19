@@ -446,6 +446,18 @@ plus market orders) 3.2 s. The market there is a toy, so this is not a result.
 - **Experiment files** take `mlofi` as the feature and `return` as the target so far; other
   methods are added to the runner as they get experiments.
 
+## Binance public archives
+
+`python scripts/fetch_binance.py --start 2026-09-01 --end 2026-11-18` downloads Binance's
+daily trade archives from data.binance.vision (`aggTrades` by default, or `--kind trades`;
+spot, or `--market um`/`cm` futures) into `binance-data/`, each file checked against the
+SHA-256 checksum Binance publishes beside it. Run again, it fetches only what is missing
+or failed its check; a day not published yet is skipped. Standard library only, so it runs
+on any machine with Python 3.9 or newer. The archives hold trades without the order book:
+enough for hypotheses on trades alone (intensity, VPIN, volatility, trade clocks), not for
+order-flow imbalance or the fill simulator. Spot timestamps are in microseconds from
+2025-01-01, in milliseconds before.
+
 ## Tests
 
 ```bash
