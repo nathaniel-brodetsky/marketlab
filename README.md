@@ -443,7 +443,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 138 in all, each caught.
+it is compared with and a taker filled with no latency: 139 in all, each caught.
 
 ## Numbers
 
@@ -585,10 +585,10 @@ against an equal short in the perpetual and collects the funding, a position hel
 so that its fees, 24 bp in and out at a regular account's taker rates, are spread over many
 settlements. The rule decides only at a settlement: hold over the next period while the
 mean rate of the last 21 settlements is above zero, opening and closing at the open of the
-hour bar that starts then. The P&L, in bp of the notional at the opening, is the funding
+hour bar that starts then. The return, in bp of the notional at the start of each period, is the funding
 received (at Binance's mark price), the change of the basis between the two legs, and the
 fees; by UTC day, tested for a mean above zero with Newey-West errors, PBO over twelve
-rules by month, Benjamini-Hochberg over every hypothesis written. Development October 2019
+rules by month, Benjamini-Hochberg over every hypothesis written. Development January 2020
 .. December 2023; held out, once, January 2024 .. October 2026. Not modelled: the margin
 the short leg needs and its liquidation in a rally, the exchange's own risk, and the
 capital tied in both legs, so the return per notional is above the return on the capital.

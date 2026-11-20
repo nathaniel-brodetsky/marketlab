@@ -171,6 +171,10 @@ def fetch_file(
     return label, "ok", zpath.stat().st_size
 
 
+def _size(n: int) -> str:
+    return f"{n / 1e6:8.1f} MB" if n >= 1e6 else f"{n / 1e3:8.1f} kB"
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -224,7 +228,7 @@ def main(argv: list[str] | None = None) -> int:
             except Exception as e:  # report the file, keep the others going
                 day, status, size = d, f"error: {e}", 0
             results.append((day, status, size))
-            print(f"  {day}  {status:<12} {size / 1e6:8.1f} MB", flush=True)
+            print(f"  {day}  {status:<12} {_size(size)}", flush=True)
 
     results.sort()
     good = [r for r in results if r[1] in ("ok", "have")]

@@ -728,20 +728,20 @@ M = [
     ),
     (
         "marketlab/carry.py",
-        "            funding[k + 1] += m.rate[j] * m.mark[j] / entry",
-        "            funding[k] += m.rate[i] * m.mark[i] / entry",
+        "            funding[k + 1] += m.rate[j] * m.mark[j] / now",
+        "            funding[k] += m.rate[i] * m.mark[i] / now",
         "the carry paid the funding settled before it opened",
     ),
     (
         "marketlab/carry.py",
-        "            fees[k] += (fs * m.spot[i] + fp * m.perp[i]) / entry  # in and out alike",
-        "            fees[k] += (fs * m.spot[i] + fp * m.perp[i]) / entry if w else 0.0",
+        "            fees[k] += (fs * m.spot[i] + fp * m.perp[i]) / m.spot[i]  # in and out alike",
+        "            fees[k] += (fs * m.spot[i] + fp * m.perp[i]) / m.spot[i] if w else 0.0",
         "the carry closed without fees",
     ),
     (
         "marketlab/carry.py",
-        "            basis[k + 1] += ((m.perp[i] - m.spot[i]) - (m.perp[j] - m.spot[j])) / entry",
-        "            basis[k + 1] += ((m.perp[j] - m.spot[j]) - (m.perp[i] - m.spot[i])) / entry",
+        "            basis[k + 1] += ((m.perp[i] - m.spot[i]) - (m.perp[j] - m.spot[j])) / now",
+        "            basis[k + 1] += ((m.perp[j] - m.spot[j]) - (m.perp[i] - m.spot[i])) / now",
         "the carry's basis the wrong way round",
     ),
     (
@@ -755,6 +755,12 @@ M = [
         "        out[lookback - 1 :] = (c[lookback:] - c[:-lookback]) / lookback",
         "        out[lookback:] = (c[lookback:-1] - c[: -lookback - 1]) / lookback",
         "the carry's mean a settlement late",
+    ),
+    (
+        "marketlab/carry.py",
+        "            now = m.spot[i]  # the notional over this period",
+        "            now = m.spot[rows[0]]",
+        "the carry measured against the price of the period's first day",
     ),
     (
         "marketlab/carry.py",

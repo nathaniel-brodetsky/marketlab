@@ -5,8 +5,9 @@ The position: long `q` of the coin on spot and short `q` of the USD-M perpetual,
 and closed together. While it is held, the short side receives each settlement's funding
 (`q` x mark price x rate; it pays when the rate is negative), and the two legs together
 gain or lose the change of the basis, perpetual less spot. Each opening and each closing
-pays a taker fee on each leg. Everything is in basis points of the notional at the
-opening, `q` x spot price then.
+pays a taker fee on each leg. Everything is in basis points of the position's notional at
+the start of each period, `q` x spot price then: each period's return, so that a position
+held for years is not measured against the price of the day it was opened.
 
 The rule, at each funding settlement and only then: hold the position over the next
 period if the mean rate of the last `lookback` settlements, this one included, is above
@@ -261,7 +262,7 @@ def trailing_mean(rate: np.ndarray, lookback: int) -> np.ndarray:
 @dataclass
 class Path_:
     """One rule over one period, by settlement: what each brought, in fractions of the
-    notional at the opening."""
+    position's notional at the start of the period between settlements that it ends."""
 
     rows: np.ndarray  # the settlements of the period, indices into the market
     funding: np.ndarray
@@ -283,22 +284,21 @@ def follow(m: Market, rule: Rule, lo: int, hi: int, spot_bp: float, perp_bp: flo
     funding, basis, fees = np.zeros(n), np.zeros(n), np.zeros(n)
     held = np.zeros(n, dtype=bool)
     fs, fp = spot_bp / 1e4, perp_bp / 1e4
-    state, entry, entries = False, np.nan, 0
+    state, entries = False, 0
     with np.errstate(invalid="ignore"):
         want = sig[rows] > rule.threshold_bp / 1e4
     for k, i in enumerate(rows):
         w = bool(want[k]) and k < n - 1  # flat at the end of the period
         if w != state:
-            if w:
-                entry = m.spot[i]
-                entries += 1
-            fees[k] += (fs * m.spot[i] + fp * m.perp[i]) / entry  # in and out alike
+            entries += w
+            fees[k] += (fs * m.spot[i] + fp * m.perp[i]) / m.spot[i]  # in and out alike
             state = w
         held[k] = state
         if state:
             j = rows[k + 1]
-            funding[k + 1] += m.rate[j] * m.mark[j] / entry
-            basis[k + 1] += ((m.perp[i] - m.spot[i]) - (m.perp[j] - m.spot[j])) / entry
+            now = m.spot[i]  # the notional over this period
+            funding[k + 1] += m.rate[j] * m.mark[j] / now
+            basis[k + 1] += ((m.perp[i] - m.spot[i]) - (m.perp[j] - m.spot[j])) / now
     return Path_(rows, funding, basis, fees, held, entries)
 
 

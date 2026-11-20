@@ -122,14 +122,15 @@ def test_the_money_by_hand():
     p = carry.follow(m, carry.Rule(2, 0.0), int(t[0]), int(t[-1]) + 1, 7.5, 4.5)
     # means: -, 1, 2, 1.5, -2, -2.5 bp: in at 1, out at 4
     assert p.held.tolist() == [False, True, True, True, False, False] and p.entries == 1
-    e = spot[1]
-    assert p.fees[1] == pytest.approx((7.5e-4 * 101 + 4.5e-4 * 101.0) / e)
-    assert p.fees[4] == pytest.approx((7.5e-4 * 104 + 4.5e-4 * 103.9) / e)
-    assert p.funding.tolist() == pytest.approx([0, 0, 1e-4 * mark[2] / e, 2e-4 * mark[3] / e,
-                                                -6e-4 * mark[4] / e, 0])  # fmt: skip
+    # each period against the notional at its start, q x the spot price then
+    assert p.fees[1] == pytest.approx((7.5e-4 * 101 + 4.5e-4 * 101.0) / 101)
+    assert p.fees[4] == pytest.approx((7.5e-4 * 104 + 4.5e-4 * 103.9) / 104)
+    assert p.funding.tolist() == pytest.approx([0, 0, 1e-4 * mark[2] / 101, 2e-4 * mark[3] / 102,
+                                                -6e-4 * mark[4] / 103, 0])  # fmt: skip
     basis = perp - spot
-    assert p.basis[2] == pytest.approx((basis[1] - basis[2]) / e)
-    assert p.basis.sum() == pytest.approx((basis[1] - basis[4]) / e)  # the basis change
+    assert p.basis.tolist() == pytest.approx([0, 0, (basis[1] - basis[2]) / 101,
+                                              (basis[2] - basis[3]) / 102,
+                                              (basis[3] - basis[4]) / 103, 0])  # fmt: skip
     d = carry.daily(m, p, "2021-03-01", "2021-03-03")
     assert d["date"].to_list() == ["2021-03-01", "2021-03-02", "2021-03-03"]
     net = (p.funding + p.basis - p.fees) * 1e4
@@ -143,6 +144,20 @@ def test_the_money_by_hand():
     cum = np.cumsum(d["net"].to_numpy())
     assert s.max_drawdown_bp == pytest.approx(max(0, (np.maximum.accumulate(cum) - cum).max(),
                                                   -cum.min()))  # fmt: skip
+
+
+def test_a_year_held_while_the_price_triples_earns_its_rate():
+    # one bp a settlement for a year, the price going from 100 to 300: each period's return
+    # is against the notional then, so the year earns its 1095 bp, not three times as much
+    n = 3 * 365 + 1
+    t = np.arange(n) * 8 * 3_600 * 10**9 + carry._day0("2021-01-01")
+    spot = np.linspace(100.0, 300.0, n)
+    m = carry.Market(t, np.full(n, 1e-4), spot, spot.copy(), spot.copy())
+    p = carry.follow(m, carry.Rule(1, 0.0), int(t[0]), int(t[-1]) + 1, 0.0, 0.0)
+    assert p.entries == 1
+    # paid on the notional at the settlement, eight hours of price rise later: a hair over
+    assert p.funding.sum() * 1e4 == pytest.approx((spot[1:] / spot[:-1]).sum(), rel=1e-9)
+    assert p.funding.sum() * 1e4 == pytest.approx(1095, rel=2e-3)
 
 
 def test_no_decision_reads_after_its_time():
@@ -239,7 +254,7 @@ def test_the_committed_hypothesis_loads():
     root = Path(__file__).resolve().parents[1] / "experiments"
     spec = carry.load_spec(root / "008-funding-carry.yaml")
     assert spec.primary == carry.Rule(21, 0.0) and len(spec.variants) == 12
-    assert (spec.first, spec.last) == ("2019-10-01", "2023-12-31")
+    assert (spec.first, spec.last) == ("2020-01-01", "2023-12-31")
     assert (spec.holdout_first, spec.holdout_last) == ("2024-01-01", "2026-10-31")
     assert (spec.spot_bp, spec.perp_bp) == (7.5, 4.5)
     from marketlab.cli import kind_of

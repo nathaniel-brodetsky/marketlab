@@ -4,6 +4,10 @@
 # The carry is not new: the BIS (Working Paper 1087, "Crypto carry", 2023) documents it, and
 # its being paid in the bull market of 2021 is widely known. What is tested is whether it
 # pays a regular account, after its fees, and whether it still did over 2024 .. 2026.
+# Amended once, before any result: the development period began 2019-10-01, but
+# data.binance.vision has no USD-M klines before 2020-01, so the first run stopped while
+# loading prices (no price at 276 settlements), before it computed anything, and wrote no
+# result. It now begins 2020-01-01; nothing else changed.
 id: "008"
 name: funding-carry
 kind: carry
@@ -16,7 +20,7 @@ hypothesis: >
 data:
   symbol: BTCUSDT
   interval: 1h            # the open of the hour bar that starts at the settlement
-  days: {from: 2019-10-01, to: 2023-12-31}
+  days: {from: 2020-01-01, to: 2023-12-31}     # perpetual bars begin 2020-01
   holdout: {from: 2024-01-01, to: 2026-10-31}   # opened once, for the primary rule only
 
 rule:                     # the primary: written now, not chosen from the variants
