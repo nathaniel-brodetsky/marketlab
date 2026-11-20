@@ -19,6 +19,7 @@ from .registry import FITTED, METHODS, default_methods
 from .report import describe
 
 SEC = 1_000_000_000
+HORIZONS_COSTWALL = ("1s", "5s", "30s", "1m", "5m", "15m", "1h", "4h", "1d", "1w")
 
 
 def _clock(ns: int) -> str:
@@ -363,6 +364,44 @@ def cmd_carry_report(a: argparse.Namespace) -> int:
         "bills_pct: the risk-free rate given (--riskfree); on_capital_pct: the primary's return "
         "on the capital it needs; over_bills_pct: that less the bills. Not modelled: the "
         "exchange's own risk, auto-deleveraging, slippage, moving margin between the legs"
+    )
+    return 0
+
+
+def cmd_costwall(a: argparse.Namespace) -> int:
+    from . import costwall as cw
+
+    rows = cw.wall(a.data, a.symbol, a.horizons, a.last_days, a.years, a.market)
+    if not rows:
+        raise ContractError(
+            f"no {a.symbol} aggTrades days or 1h klines under {a.data}: scripts/fetch_binance.py"
+        )
+    k = cw.kappa(a.q)
+    table = []
+    for r in rows:
+        row = {
+            "horizon": r.horizon,
+            "from": r.source,
+            "returns": r.n,
+            "sigma_bp": round(r.sigma_bp, 2),
+            "mean_abs_bp": round(r.mean_abs_bp, 2),
+        }
+        for c in a.costs:
+            need = r.needed(c, a.q)
+            row[f"ic_for_{c:g}bp"] = f"{need:.3f}" if need <= 1 else ">1"
+        table.append(row)
+    print(
+        f"{a.symbol}: the correlation a signal needs with the return over each horizon to pay "
+        f"a round trip, trading its top and bottom {a.q:.0%} (a trade then earns "
+        f"{k:.2f} x IC x sigma before costs)"
+    )
+    with _wide():
+        print(pl.DataFrame(table))
+    print(
+        "sigma_bp: standard deviation of the log return over the horizon, bp; mean_abs_bp: its "
+        "mean size. ic_for_Nbp: the IC needed against a round trip of N bp; >1: none can pay it. "
+        "Returns and signal taken as jointly normal: a rough wall for where to look, not a "
+        "verdict on any signal"
     )
     return 0
 
@@ -1047,6 +1086,26 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
     g.add_argument("--out", help="per-day table to this .csv or .parquet file")
     g.set_defaults(run=cmd_strategy)
+
+    w = sub.add_parser(
+        "costwall", help="how strong a signal must be to pay a round trip, horizon by horizon"
+    )
+    w.add_argument("--data", default="binance-data", help="default ./binance-data")
+    w.add_argument("--symbol", default="BTCUSDT")
+    w.add_argument("--horizons", nargs="+", default=list(HORIZONS_COSTWALL))
+    w.add_argument("--last-days", type=int, help="only the most recent aggTrades days")
+    w.add_argument("--years", type=float, default=1.0, help="of hourly klines (default 1)")
+    w.add_argument("--market", default="spot", choices=["spot", "um"], help="klines' market")
+    w.add_argument(
+        "--costs",
+        nargs="+",
+        type=float,
+        default=[15.0, 9.0, 3.6],
+        help="round trips, bp (default 15: spot taker, 9: USD-M taker, 3.6: USD-M maker fees "
+        "alone; regular account paying in BNB)",
+    )
+    w.add_argument("--q", type=float, default=0.05, help="share traded at each end (default 0.05)")
+    w.set_defaults(run=cmd_costwall)
 
     c = sub.add_parser(
         "carry-report",

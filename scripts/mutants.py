@@ -793,6 +793,24 @@ M = [
         "a period's high takes the bar of the next settlement",
     ),
     (
+        "marketlab/costwall.py",
+        "    return float(stats.norm.pdf(z) / q)",
+        "    return float(stats.norm.pdf(z))",
+        "the cost wall forgets that only the tails are traded",
+    ),
+    (
+        "marketlab/costwall.py",
+        '    p = np.log(price[np.searchsorted(ts, grid, side="right") - 1])',
+        '    p = np.log(price[np.searchsorted(ts, grid, side="left") - 1])',
+        "the cost wall's grid misses a trade at its own time",
+    ),
+    (
+        "marketlab/costwall.py",
+        "    return (np.diff(p) * 1e4)[ok]",
+        "    return np.diff(p) * 1e4",
+        "the cost wall's hourly returns across a gap in the bars",
+    ),
+    (
         "marketlab/carry.py",
         '    out[ok] = bars["close"].to_numpy()[j[ok]]',
         '    out[ok] = bars["open"].to_numpy()[np.minimum(i[ok], len(ot) - 1)]',

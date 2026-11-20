@@ -443,7 +443,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 144 in all, each caught.
+it is compared with and a taker filled with no latency: 147 in all, each caught.
 
 ## Numbers
 
@@ -572,7 +572,7 @@ horizon, measures PBO over them, and takes, blindly, the one with the strongest 
 beating the cost (the smallest one-sided p of its mean against it), if it beats the cost on
 enough days and its surrogates (the flow moved in time within its day by a random offset).
 Only that one goes to the held-out days, eight months of 2026 that no trade signal has read
-yet (less the first of each month, read before as Tardis.dev's futures days); if none is
+yet (less the first of each month, read before as Tardis.dev's spot days); if none is
 taken, they stay closed. `tests/test_edge.py` works the returns and the rule out by hand,
 cuts days to show no decision reads a trade after its time, finds a planted edge, does not
 find one where there is none or where the cost is above it, and passes over a combination
@@ -626,6 +626,25 @@ The order flow forecasts the next seconds and volatility forecasts the size of t
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
 taker's (007). The carry is paid after fees, but since 2022 at about the rate of US
 Treasury bills (`carry-report`), with the exchange's risk and the short leg's margin on top.
+
+Erratum: the comment in `experiments/007-flow-beats-cost.yaml` calls the days of
+Tardis.dev's recording futures days. They are Binance spot BTCUSDT. The hypothesis is left
+as committed; leaving those days out of its held-out months holds either way.
+
+## Where to look: the cost wall
+
+`marketlab costwall --data binance-data` asks, before any signal is built, at what horizon
+one could pay for itself. A rule that trades its signal's top and bottom `q` (5% by
+default) and holds for a horizon earns about `IC x sigma x phi(z_q) / q` a trade before
+costs, `sigma` being the standard deviation of the return over the horizon; so a round
+trip of `c` bp needs `IC = c / (sigma x phi(z_q) / q)`. The command measures `sigma` on the
+data (the trade archives under an hour, hourly klines from an hour to a week) and prints
+the IC needed against each of `--costs` (15 bp: a spot taker; 9: a USD-M futures taker;
+3.6: USD-M maker fees alone, before the adverse selection measured in Strategy above).
+Above 1, no signal can pay. Returns and signal are taken as jointly normal: a wall for
+deciding where to look, not a verdict on a signal; the protocol still decides those.
+`tests/test_costwall.py` works the needed IC out by hand and checks it on simulated
+signals, and works out the returns on a grid of trades and between hourly closes.
 
 ## Tests
 
