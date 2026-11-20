@@ -16,7 +16,12 @@ The rule, on each side separately:
   hour before, as in hypothesis 002): an order is withdrawn, and none is placed, while the
   signal points against its side beyond `threshold` (below `-threshold` for a bid, above
   it for an ask). Where the signal is not defined (the first hour of a segment) the orders
-  go out as without one.
+  go out as without one;
+- with a volatility gate (`vol_window`): on both sides an order is withdrawn, and none is
+  placed, while the realized volatility of the trade price over `vol_window` is above its
+  `vol_quantile` over the `vol_lookback` before (`vol_gate`, on a grid of whole seconds
+  from the start of each segment). Where the gate is not defined (until the window and half
+  the lookback fit in a segment) the orders go out as without one.
 
 Each order goes through the simulator alone (`execution.simulate`): the market does not
 react to it, and its fills depend only on when it arrived and when it left. An order at a
@@ -68,6 +73,9 @@ class Quoting:
     window: str | None = None  # the signal's window; None: no signal
     threshold: float = 1.0
     offset_bp: float = 0.0  # distance from the mid; 0: at the best prices
+    vol_window: str | None = None  # the volatility gate's window; None: no gate
+    vol_lookback: str = "60m"  # the gate's limit: a quantile of the volatility over this
+    vol_quantile: float = 0.8
 
     def __post_init__(self) -> None:
         if self.max_position < 1:
@@ -79,13 +87,26 @@ class Quoting:
         for name in ("life", "latency") + (("window",) if self.window else ()):
             if duration_ns(getattr(self, name)) <= 0:
                 raise ValueError(f"{name} must be positive")
+        if self.vol_window:
+            if not 0 <= self.vol_quantile <= 1:
+                raise ValueError("vol_quantile must be from 0 to 1")
+            for name in ("vol_window", "vol_lookback"):
+                n = duration_ns(getattr(self, name))
+                if n < 2 * SEC or n % SEC:
+                    raise ValueError(f"{name} must be whole seconds, at least two")
 
     @property
     def name(self) -> str:
         sig = f"OFI {self.window} beyond {self.threshold:g}" if self.window else "no signal"
         where = f"{self.offset_bp:g} bp from the mid" if self.offset_bp else "at the best prices"
+        gate = (
+            f"; out while the {self.vol_window} volatility is above its {self.vol_quantile:g} "
+            f"quantile over the {self.vol_lookback} before"
+            if self.vol_window
+            else ""
+        )
         return (
-            f"{sig}; {self.size} a side {where}, life {self.life}, at most "
+            f"{sig}{gate}; {self.size} a side {where}, life {self.life}, at most "
             f"{self.max_position} orders held, latency {self.latency}"
         )
 
@@ -154,23 +175,35 @@ class DayResult:
 
 
 class _Signal:
-    """The signal on the day's grid, read as it was known at a time."""
+    """A condition against each side on a grid, read as it was known at a time: what holds
+    at a row holds from its time until the next row, inside the row's segment."""
 
-    def __init__(self, sig: pl.DataFrame, window: str, threshold: float):
-        self.ts = sig["ts"].to_numpy()
-        self.seg_end = sig["seg_end"].to_numpy()
-        z = sig[f"z_{window}"].to_numpy().astype(float)  # None -> NaN
-        n = len(z)
+    def __init__(self, ts: np.ndarray, seg_end: np.ndarray, conds: dict[int, np.ndarray]):
+        self.ts = ts
+        self.seg_end = seg_end
+        n = len(ts)
         idx = np.arange(n)
         self.against: dict[int, np.ndarray] = {}
         self.next_against: dict[int, np.ndarray] = {}
         self.next_clear: dict[int, np.ndarray] = {}
-        with np.errstate(invalid="ignore"):
-            conds = {BID: z < -threshold, ASK: z > threshold}
         for side, a in conds.items():
             self.against[side] = a
             self.next_against[side] = _next_true(a, idx, n)
             self.next_clear[side] = _next_true(~a, idx, n)
+
+    @classmethod
+    def ofi(cls, sig: pl.DataFrame, window: str, threshold: float) -> _Signal:
+        """The order-flow imbalance of `maker.signal` beyond `threshold` against a side."""
+        z = sig[f"z_{window}"].to_numpy().astype(float)  # None -> NaN
+        with np.errstate(invalid="ignore"):
+            conds = {BID: z < -threshold, ASK: z > threshold}
+        return cls(sig["ts"].to_numpy(), sig["seg_end"].to_numpy(), conds)
+
+    @classmethod
+    def gate(cls, g: pl.DataFrame) -> _Signal:
+        """The volatility gate of `vol_gate`, against both sides while it is high."""
+        high = g["high"].to_numpy().astype(bool)
+        return cls(g["ts"].to_numpy(), g["seg_end"].to_numpy(), {BID: high, ASK: high})
 
     def row(self, t: int) -> int:
         """The last grid row at or before `t` if `t` is still in that row's segment, else -1."""
@@ -191,6 +224,62 @@ class _Signal:
         if j < len(self.ts) and self.ts[j] <= until:
             return int(self.ts[j])
         return None
+
+
+GATE_SCHEMA = {
+    "ts": pl.Int64, "segment": pl.Int32, "seg_end": pl.Int64, "rv": pl.Float64,
+    "limit": pl.Float64, "high": pl.Boolean,
+}  # fmt: skip
+
+
+def vol_gate(day: Day, window: str, lookback: str, quantile: float) -> pl.DataFrame:
+    """The volatility gate on a grid of whole seconds from the start of each segment (`ts`,
+    the segment's start included):
+
+    - `rv`: realized volatility of the trade price over `window`, bp: the square root of
+      the sum of squared log changes, from one second to the next, of the last trade price
+      at or before each second; null until `window` fits in the segment;
+    - `limit`: the `quantile` of `rv` over the `lookback` before the row (the rows before
+      it, not the row itself), null with less than half of `lookback` of `rv`;
+    - `high`: `rv` above `limit`, false where either is null.
+
+    Each row is computed from the trades received at or before its time."""
+    w, back = duration_ns(window) // SEC, duration_ns(lookback) // SEC
+    t = day.valid("trades", ["recv_ts", "price"]).sort("recv_ts", maintain_order=True)
+    tts, tpx, tseg = (t[c].to_numpy() for c in ("recv_ts", "price", "segment"))
+    parts = []
+    for k, (s, e) in enumerate(day.intervals):
+        ts = np.arange(s, e, SEC, dtype=np.int64)
+        mine = tseg == k
+        i = np.searchsorted(tts[mine], ts, side="right") - 1
+        px = np.where(i >= 0, tpx[mine][np.maximum(i, 0)].astype(np.float64), np.nan)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            r = np.log(px[1:] / px[:-1])
+        c = np.concatenate([[0.0], np.cumsum(np.nan_to_num(r * r))])
+        j = np.arange(len(ts))
+        rv = np.full(len(ts), np.nan)
+        full = j >= w
+        rv[full] = np.sqrt(np.maximum(c[j[full]] - c[j[full] - w], 0.0)) * 1e4
+        parts.append(
+            pl.DataFrame(
+                {"ts": ts, "segment": np.full(len(ts), k, np.int32),
+                 "seg_end": np.full(len(ts), e, np.int64), "rv": rv},
+                schema={c: GATE_SCHEMA[c] for c in ("ts", "segment", "seg_end", "rv")},
+            ).with_columns(
+                pl.col("rv").fill_nan(None).shift(1).rolling_quantile(
+                    quantile, interpolation="linear", window_size=back,
+                    min_samples=max(back // 2, 1),
+                ).alias("limit")
+            )
+        )  # fmt: skip
+    if not parts:
+        return pl.DataFrame(schema=GATE_SCHEMA)
+    return (
+        pl.concat(parts)
+        .with_columns(pl.col("rv").fill_nan(None))
+        .with_columns(high=(pl.col("rv") > pl.col("limit")).fill_null(False))
+        .select(list(GATE_SCHEMA))
+    )
 
 
 def _next_true(a: np.ndarray, idx: np.ndarray, n: int) -> np.ndarray:
@@ -249,8 +338,14 @@ def _quote(
     lat, life = duration_ns(q.latency), duration_ns(q.life)
     intervals = whole.intervals
     starts = np.array([s for s, _ in intervals], dtype=np.int64)
-    # the signal from a day of its own, let go once computed: a whole day's book is large
-    sig = _Signal(signal(fresh(), [q.window]), q.window, q.threshold) if q.window else None
+    # the signal and the gate, each from a day of its own, let go once computed: a whole
+    # day's book is large
+    blocks: list[_Signal] = []
+    if q.window:
+        blocks.append(_Signal.ofi(signal(fresh(), [q.window]), q.window, q.threshold))
+    if q.vol_window:
+        g = vol_gate(fresh(), q.vol_window, q.vol_lookback, q.vol_quantile)
+        blocks.append(_Signal.gate(g))
     end = max(r.last_recv_ts for r in whole.runs) + 1
     if chunk is None or piece is None:
         pieces: list[tuple[int | None, int]] = [(None, end)]
@@ -281,11 +376,11 @@ def _quote(
             if k < 0 or t >= intervals[k][1]:  # in a hole: wait for the next valid interval
                 nxt[side] = int(starts[k + 1]) if k + 1 < len(starts) else NEVER
                 continue
-            if sig is not None:
-                until = sig.blocked_until(side, t)
-                if until is not None:
-                    nxt[side] = max(until, t + 1)
-                    continue
+            # out while a signal or the gate is against the side: until the last of them clears
+            until = [u for b in blocks if (u := b.blocked_until(side, t)) is not None]
+            if until:
+                nxt[side] = max(*until, t + 1)
+                continue
             if side * position + qty > q.max_position * qty:
                 soon = t + WAIT
                 if pending:
@@ -299,8 +394,8 @@ def _quote(
                 nxt[side] = t + RETRY
                 continue
             cancel = t + life
-            if sig is not None:
-                pull = sig.first_against(side, t, cancel)
+            for b in blocks:  # withdrawn as soon as the first of them turns against it
+                pull = b.first_against(side, t, cancel)
                 if pull is not None:
                     cancel = pull
             o = Order(len(order_rows), side, qty, t, True, price, cancel)

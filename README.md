@@ -47,7 +47,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab bars DIR [--every 1s]` | time bars against tick, volume and dollar bars: return distribution and dependence |
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
-| `marketlab strategy --data ROOT [--offsets 0 1 2] [--signal 1s] [--threshold 1] [--life 10s] [--max-position 5] [--modes ...] [--fees ...] [--by-day] [--workers N] [--out FILE]` | a market-making rule quoting both sides through the fill simulator, day by day: P&L before fees, what the fills captured against the mid and what the position lost, the maker fee at which it breaks even, net P&L at given fees |
+| `marketlab strategy --data ROOT [--offsets 0 1 2] [--signal 1s] [--threshold 1] [--vol-window 1m] [--vol-quantiles none 0.8] [--life 10s] [--max-position 5] [--modes ...] [--fees ...] [--by-day] [--workers N] [--out FILE]` | a market-making rule quoting both sides through the fill simulator, day by day: P&L before fees, what the fills captured against the mid and what the position lost, the maker fee at which it breaks even, net P&L at given fees |
 | `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, a `maker` rule or a `volatility` forecast) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
 | `marketlab experiment list` | every hypothesis, run or only written, with its verdict and its p-value adjusted for all of them as they stand |
 | `marketlab archive check [ROOT]` | integrity of Binance trade archives downloaded with `scripts/fetch_binance.py`: missing ids and trades, times, gaps between days |
@@ -270,6 +270,15 @@ break even?
 - With `--signal W`, an order is withdrawn, and none is placed, while the level-1
   order-flow imbalance over `W`, divided by its spread over the hour before (hypothesis
   002), points against its side beyond `--threshold`.
+- With `--vol-window W`, a volatility gate: on both sides an order is withdrawn, and none
+  is placed, while the realized volatility of the trade price over `W` (one-second log
+  changes of the last trade price) is above its quantile over the `--vol-lookback` before
+  (default 60m), not counting the second compared. `--vol-quantiles` takes several, a run
+  each, and `none` for a run without the gate: `--vol-window 1m --vol-quantiles none 0.5
+  0.8`. Where the gate is not defined (until the window and half the lookback fit in a
+  segment), orders go out as without it. Hypothesis 006 found this volatility to forecast
+  the size of the next 30 s move, not its direction; the gate tests whether a maker gains
+  by stepping aside then.
 - A day starts flat; what is held at its end is valued at its last mid.
 
 Each order goes through the simulator alone, so the market does not react to it (see
@@ -280,15 +289,18 @@ The break-even fee is gross P&L per traded notional, in basis points: a maker fe
 leaves a profit, a negative one is a rebate. Conclusions from the pessimistic queue;
 `--modes` shows the others for sensitivity. An order away from the best prices may rest at
 a level the book does not show; it then waits behind all of it (see Execution), and
-`unseen` reports the share of such orders. The command prints one row per offset and
-queue mode, then net P&L a day at each of `--fees`; `--by-day` adds a table of the days
+`unseen` reports the share of such orders. The command prints one row per offset, gate
+and queue mode, then net P&L a day at each of `--fees`; `--by-day` adds a table of the days
 for each run.
 
 `tests/test_strategy.py`: every order's fills are what the simulator gives it alone, at
-the price the rule gives from the best prices last seen, at them and away from them; the position never passes its limit and every decision knew it;
-the accounts add up; a day in pieces equals the whole day, also for orders resting long
-past their piece; a day cut short changes no decision before the cut; the signal keeps
-orders out while it is against them, and a threshold no value reaches is no signal.
+the price the rule gives from the best prices last seen, at them and away from them; the
+position never passes its limit and every decision knew it; the accounts add up; a day in
+pieces equals the whole day, also for orders resting long past their piece; a day cut
+short changes no decision before the cut; the signal, the gate and both together keep
+orders out while against them and withdraw them at the first row against; the gate worked
+out by hand, high only above its limit, reading no trade after its time; a threshold no
+value reaches is no signal, and a gate never defined is no gate.
 
 ## Validation protocol
 

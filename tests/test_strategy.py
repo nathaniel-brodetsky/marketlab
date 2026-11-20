@@ -2,7 +2,7 @@
 as the simulator gives it alone, the position stays within its limit, the accounts add up,
 a day in pieces gives what the whole day gives, and no decision depends on what came after
 it. At the best prices and away from them, where some orders rest at levels the book does
-not show."""
+not show; with the order-flow signal, the volatility gate, or both."""
 
 from dataclasses import replace
 from decimal import Decimal
@@ -24,6 +24,10 @@ SEC = 1_000_000_000
 SIZE = Decimal("0.001")
 PLAIN = st.Quoting(size=SIZE, max_position=2)
 SIGNAL = st.Quoting(size=SIZE, max_position=2, window="1s", threshold=0.5)
+#: The volatility gate over 5 s against its median over the minute before: high about half
+#: of the time where it is defined, from some 35 s into each segment.
+GATE = st.Quoting(size=SIZE, max_position=2, vol_window="5s", vol_lookback="60s", vol_quantile=0.5)
+BOTH = replace(SIGNAL, vol_window="5s", vol_lookback="60s", vol_quantile=0.5)
 #: About 6 steps from the mid at 97000.00: away from the best prices, filled at times.
 AWAY = st.Quoting(size=SIZE, max_position=2, offset_bp=0.006)
 #: About 22 steps: past the 20 levels the book shows, often. Unseen levels filling are
@@ -46,7 +50,7 @@ def busy(tmp_path_factory):
 
 @pytest.fixture(scope="module")
 def results(path):
-    return {q: st.simulate_day(path, q, chunk=None) for q in (PLAIN, SIGNAL)}
+    return {q: st.simulate_day(path, q, chunk=None) for q in (PLAIN, SIGNAL, GATE, BOTH)}
 
 
 @pytest.fixture(scope="module")
@@ -89,7 +93,12 @@ def check_orders(r: st.DayResult, day: Day, q: st.Quoting, min_fills: int = 50) 
         assert o["decided"].is_unique().all()
 
 
-@pytest.mark.parametrize("q", [PLAIN, SIGNAL], ids=["plain", "signal"])
+RULES = pytest.mark.parametrize(
+    "q", [PLAIN, SIGNAL, GATE, BOTH], ids=["plain", "signal", "gate", "both"]
+)
+
+
+@RULES
 def test_each_order_fills_as_the_simulator_gives_it_alone(path, results, q):
     check_orders(results[q], Day.open(path), q)
 
@@ -172,7 +181,7 @@ def test_the_accounts_add_up(path, results):
         assert 0 < r.quoted["bid"] <= 1 and 0 < r.quoted["ask"] <= 1
 
 
-@pytest.mark.parametrize("q", [PLAIN, SIGNAL], ids=["plain", "signal"])
+@RULES
 def test_a_day_in_pieces_gives_what_the_whole_day_gives(path, results, q):
     # pieces of two minutes cross the gap, the segment ends and the day's end
     whole = results[q]
@@ -199,7 +208,7 @@ def test_pieces_read_far_enough_for_orders_that_rest_long(tmp_path):
     assert part.fills.equals(whole.fills)
 
 
-@pytest.mark.parametrize("q", [PLAIN, SIGNAL], ids=["plain", "signal"])
+@RULES
 @pytest.mark.parametrize("cut_s", [150.3, 301.0, 452.7])
 def test_no_decision_depends_on_what_came_after_it(path, results, q, cut_s):
     day = Day.open(path)
@@ -218,26 +227,115 @@ def test_no_decision_depends_on_what_came_after_it(path, results, q, cut_s):
     assert full.fills.filter(early).equals(short.fills.filter(early))
 
 
-def test_the_signal_keeps_orders_out_while_it_is_against_them(path, results):
-    r = results[SIGNAL]
-    s = st._Signal(maker.signal(Day.open(path), ["1s"]), "1s", SIGNAL.threshold)
-    life = duration_ns(SIGNAL.life)
-    pulled = 0
+def _blockers(path, q: st.Quoting) -> list[st._Signal]:
+    day, out = Day.open(path), []
+    if q.window:
+        out.append(st._Signal.ofi(maker.signal(day, [q.window]), q.window, q.threshold))
+    if q.vol_window:
+        out.append(st._Signal.gate(st.vol_gate(day, q.vol_window, q.vol_lookback, q.vol_quantile)))
+    return out
+
+
+def _against_at(s: st._Signal, side: int, t: int) -> bool:
+    i = s.row(t)
+    return i >= 0 and bool(s.against[side][i])
+
+
+@pytest.mark.parametrize("q", [SIGNAL, GATE, BOTH], ids=["signal", "gate", "both"])
+def test_orders_stay_out_while_a_signal_or_the_gate_is_against_them(path, results, q):
+    r = results[q]
+    blockers = _blockers(path, q)
+    life = duration_ns(q.life)
+    pulled = {id(s): 0 for s in blockers}
     for row in r.orders.iter_rows(named=True):
         side, t, cancel = row["side"], row["decided"], row["cancel"]
-        i = s.row(t)
-        assert i < 0 or not s.against[side][i], "placed while the signal was against it"
-        rows = np.flatnonzero((s.ts > t) & (s.ts <= cancel))
-        if cancel < t + life:
-            pulled += 1
-            assert s.ts[rows[-1]] == cancel and s.against[side][rows[-1]]
-            assert not s.against[side][rows[:-1]].any()
-        else:
-            assert not s.against[side][rows].any()
-    assert pulled > 10
+        for s in blockers:
+            assert not _against_at(s, side, t), "placed while a signal or the gate was against"
+        # withdrawn at the first row of any of them against it before its life is out
+        first = [
+            int(s.ts[i])
+            for s in blockers
+            for i in np.flatnonzero((s.ts > t) & (s.ts <= t + life) & s.against[side])[:1]
+        ]
+        assert cancel == min([*first, t + life])
+        for s in blockers:
+            if cancel < t + life and _against_at(s, side, cancel):
+                pulled[id(s)] += 1
+    assert all(n > 10 for n in pulled.values()), pulled
     # a threshold no value reaches is no signal at all
     never = replace(SIGNAL, threshold=1e12)
     assert st.simulate_day(path, never, chunk=None).orders.equals(results[PLAIN].orders)
+
+
+def test_the_gate_by_hand(path):
+    day = Day.open(path)
+    g = st.vol_gate(day, "5s", "60s", 0.5)
+    tr = day.valid("trades", ["recv_ts", "price"])
+    tts, px, seg = (tr[c].to_numpy() for c in ("recv_ts", "price", "segment"))
+    assert len(day.intervals) == 2
+    for k, (s, e) in enumerate(day.intervals):
+        rows = g.filter(pl.col("segment") == k)
+        assert rows["ts"].to_list() == list(range(s, e, SEC))
+        assert (rows["seg_end"] == e).all()
+
+    def last_price(t, k):
+        mine = (seg == k) & (tts <= t)
+        return float(px[mine][-1]) if mine.any() else np.nan
+
+    def rv(t, k):
+        p = [last_price(t - j * SEC, k) for j in range(5, -1, -1)]
+        r = np.log(np.array(p[1:]) / np.array(p[:-1]))
+        return float(np.sqrt(np.nansum(r * r)) * 1e4)
+
+    rng = np.random.default_rng(3)
+    for i in [*rng.choice(len(g), 40, replace=False).tolist(), 0, 4, 5, 34, 35, 36]:
+        row = g.row(i, named=True)
+        t, k = row["ts"], row["segment"]
+        s = day.intervals[k][0]
+        if t - 5 * SEC < s:
+            assert row["rv"] is None
+        else:
+            assert row["rv"] == pytest.approx(rv(t, k), rel=1e-9, abs=1e-12)
+        before = [rv(u, k) for u in range(max(t - 60 * SEC, s + 5 * SEC), t, SEC)]
+        if len(before) < 30:
+            assert row["limit"] is None and not row["high"]
+        else:
+            assert row["limit"] == pytest.approx(np.quantile(before, 0.5), rel=1e-9)
+            assert row["high"] == (row["rv"] > row["limit"])
+    defined = g.filter(pl.col("limit").is_not_null())
+    assert 0.3 < defined["high"].mean() < 0.7 and len(defined) > 400
+
+
+def test_the_gate_is_high_only_above_its_limit(tmp_path):
+    # a quiet market: the price often holds for five seconds, and its volatility, nil, is
+    # then at a limit of nil too, which is not above it
+    quiet = synth.write(synth.Scenario(seed=11, seconds=600.0, trade_rate=0.5), tmp_path)
+    g = st.vol_gate(Day.open(quiet), "5s", "60s", 0.5).filter(pl.col("limit").is_not_null())
+    at = g.filter(pl.col("rv") == pl.col("limit"))
+    assert len(at) > 20 and not at["high"].any()
+    assert g["high"].to_list() == (g["rv"] > g["limit"]).to_list()
+
+
+def test_the_gate_reads_nothing_after_its_time(path):
+    day = Day.open(path)
+    full = st.vol_gate(day, "5s", "60s", 0.8)
+    for cut_s in (61.5, 302.0, 451.0):
+        short = st.vol_gate(day.truncated(day.intervals[0][0] + int(cut_s * SEC)), "5s", "60s", 0.8)
+        assert len(short) > 50
+        assert (
+            full.filter(pl.col("ts") <= short["ts"].max())
+            .drop("seg_end")
+            .equals(short.drop("seg_end"))
+        )
+
+
+def test_a_gate_never_defined_is_no_gate(path, results):
+    # half of an hour's lookback never fits in a segment of five minutes
+    never = replace(GATE, vol_lookback="1h")
+    g = st.vol_gate(Day.open(path), "5s", "1h", 0.5)
+    assert g["limit"].null_count() == len(g) and not g["high"].any()
+    assert st.simulate_day(path, never, chunk=None).orders.equals(results[PLAIN].orders)
+    assert results[GATE].quoted["bid"] < results[PLAIN].quoted["bid"]
 
 
 def test_quoting_is_checked(path):
@@ -247,6 +345,13 @@ def test_quoting_is_checked(path):
         st.Quoting(threshold=-1)
     with pytest.raises(ValueError, match="offset_bp"):
         st.Quoting(offset_bp=-0.5)
+    with pytest.raises(ValueError, match="vol_quantile"):
+        st.Quoting(vol_window="1m", vol_quantile=1.5)
+    with pytest.raises(ValueError, match="vol_window must be whole seconds"):
+        st.Quoting(vol_window="1500ms")
+    with pytest.raises(ValueError, match="vol_lookback must be whole seconds"):
+        st.Quoting(vol_window="1m", vol_lookback="1s")
+    st.Quoting(vol_lookback="1s")  # no gate: its lookback is not read
     with pytest.raises(ValueError, match="whole quantity steps"):
         st.simulate_day(path, st.Quoting(size=Decimal("0.000001")))
 
@@ -291,3 +396,18 @@ def test_the_command(tmp_path, capsys):
     assert main(["strategy", "--data", str(data), "--min-hours", "0"]) == 0
     assert "from the mid, pessimistic" not in capsys.readouterr().out, "days only with --by-day"
     assert main(["strategy", "--data", str(data), "--min-hours", "30"]) == 2
+    gated = tmp_path / "gated.csv"
+    code = main(
+        ["strategy", "--data", str(data), "--min-hours", "0", "--vol-window", "5s",
+         "--vol-lookback", "60s", "--vol-quantiles", "none", "0.5", "--by-day",
+         "--out", str(gated)]
+    )  # fmt: skip
+    text = capsys.readouterr().out
+    assert code == 0
+    assert "above its 0.5 quantile over the 60s before" in text
+    assert "volatility gate 0.5, pessimistic queue" in text
+    t = pl.read_csv(gated)
+    assert t["vol_quantile"].to_list() == [None, 0.5]
+    assert t["quoted_bid"][1] < t["quoted_bid"][0]
+    alone = ["strategy", "--data", str(data), "--min-hours", "0", "--vol-quantiles", "0.5"]
+    assert main(alone) == 2, "a quantile without --vol-window"

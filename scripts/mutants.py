@@ -631,6 +631,48 @@ M = [
         "captured spread with the wrong sign",
     ),
     (
+        "marketlab/strategy.py",
+        'pl.col("rv").fill_nan(None).shift(1).rolling_quantile(',
+        'pl.col("rv").fill_nan(None).rolling_quantile(',
+        "the gate's limit counts the second it is compared with",
+    ),
+    (
+        "marketlab/strategy.py",
+        'i = np.searchsorted(tts[mine], ts, side="right") - 1',
+        'i = np.searchsorted(tts[mine], ts + SEC, side="right") - 1',
+        "the gate reads the trades of the next second",
+    ),
+    (
+        "marketlab/strategy.py",
+        "        full = j >= w\n",
+        "        full = j >= w - 1\n",
+        "the gate's window before it fits in the segment",
+    ),
+    (
+        "marketlab/strategy.py",
+        "min_samples=max(back // 2, 1),",
+        "min_samples=1,",
+        "the gate's limit from a few seconds of volatility",
+    ),
+    (
+        "marketlab/strategy.py",
+        'high=(pl.col("rv") > pl.col("limit"))',
+        'high=(pl.col("rv") >= pl.col("limit"))',
+        "the gate high at its limit",
+    ),
+    (
+        "marketlab/strategy.py",
+        "until = [u for b in blocks if (u := b.blocked_until(side, t)) is not None]",
+        "until = [u for b in blocks[:1] if (u := b.blocked_until(side, t)) is not None]",
+        "an order placed while the gate is high beside the signal",
+    ),
+    (
+        "marketlab/strategy.py",
+        "            for b in blocks:  # withdrawn as soon as the first of them turns against it",
+        "            for b in blocks[:1]:",
+        "an order left out while the gate turns high beside the signal",
+    ),
+    (
         "marketlab/execution/sim.py",
         "            elif hidden:\n                continue  # behind all of a level not yet seen\n",
         "",

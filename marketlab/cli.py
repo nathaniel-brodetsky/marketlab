@@ -598,8 +598,20 @@ def cmd_strategy(a: argparse.Namespace) -> int:
         latency=a.latency,
         window=None if a.signal == "none" else a.signal,
         threshold=a.threshold,
+        vol_lookback=a.vol_lookback,
     )
-    rules = [replace(base, offset_bp=o) for o in a.offsets]
+    gates: list[float | None] = []
+    for text in a.vol_quantiles or (["0.8"] if a.vol_window else ["none"]):
+        gates.append(None if text == "none" else float(text))
+    if any(g is not None for g in gates) and not a.vol_window:
+        raise ContractError("--vol-quantiles needs --vol-window, e.g. --vol-window 1m")
+    rules = [
+        replace(base, offset_bp=o)
+        if g is None
+        else replace(base, offset_bp=o, vol_window=a.vol_window, vol_quantile=g)
+        for o in a.offsets
+        for g in gates
+    ]
     found = survey(a.data, a.symbol, exclude=a.exclude)
     if a.days:
         found = [d for d in found if d.date in set(a.days)]
@@ -624,13 +636,16 @@ def cmd_strategy(a: argparse.Namespace) -> int:
             t = st.table(results).with_columns(
                 hours=pl.Series([d.usable_hours for d in days]),
                 offset_bp=pl.lit(q.offset_bp),
+                vol_quantile=pl.lit(q.vol_quantile if q.vol_window else None, pl.Float64),
                 rule=pl.lit(q.name),
             )
             rows.append(t)
             s = st.summarize(results)
+            gate = f"{q.vol_quantile:g}" if q.vol_window else "none"
             summary.append(
                 {
                     "offset_bp": q.offset_bp,
+                    "gate": gate,
                     "mode": str(mode),
                     "fills_day": round(s.fills_per_day),
                     "traded_day": round(s.notional_per_day),
@@ -646,11 +661,12 @@ def cmd_strategy(a: argparse.Namespace) -> int:
                 }
             )  # fmt: skip
             nets.append(
-                {"offset_bp": q.offset_bp, "mode": str(mode)}
+                {"offset_bp": q.offset_bp, "gate": gate, "mode": str(mode)}
                 | {f"fee {f:g}": round(s.net_per_day(f), 2) for f in a.fees}
             )
             if a.by_day:
-                print(f"\n{q.offset_bp:g} bp from the mid, {mode} queue")
+                gated = f", volatility gate {gate}" if q.vol_window else ""
+                print(f"\n{q.offset_bp:g} bp from the mid{gated}, {mode} queue")
                 shown = t.select(
                     "date",
                     pl.col("hours").round(1),
@@ -677,7 +693,8 @@ def cmd_strategy(a: argparse.Namespace) -> int:
         print(pl.DataFrame(nets))
     print(
         "\nbe_bp: the maker fee at which it breaks even, mean of days, be_se its standard "
-        "error; gross_pos: share of days with a positive gross P&L; unseen: share of orders "
+        "error; gross_pos: share of days with a positive gross P&L; gate: the quantile of "
+        "the volatility above which no order is out (none: no gate); unseen: share of orders "
         "at a level the book did not show (rested behind all of it); quoted: share of the "
         "time with an order in the book. Conclusions from the pessimistic queue; every order "
         "goes through the simulator alone (the market does not react to it)"
@@ -837,6 +854,20 @@ def parser() -> argparse.ArgumentParser:
         type=float,
         default=[0.0],
         help="distances of the orders from the mid, bp, one run each; 0: at the best prices",
+    )
+    g.add_argument(
+        "--vol-window",
+        help="volatility gate: realized volatility of the trade price over this, e.g. 1m; "
+        "no orders while it is above its quantile (default: no gate)",
+    )
+    g.add_argument(
+        "--vol-lookback", default="60m", help="the gate's quantile over this before (default 60m)"
+    )
+    g.add_argument(
+        "--vol-quantiles",
+        nargs="+",
+        help="the gate's quantiles, one run each; none: a run without the gate "
+        "(default 0.8 with --vol-window)",
     )
     g.add_argument("--by-day", action="store_true", help="a table of the days for each run")
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
