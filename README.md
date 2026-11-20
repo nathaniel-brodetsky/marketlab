@@ -293,6 +293,30 @@ a level the book does not show; it then waits behind all of it (see Execution), 
 and queue mode, then net P&L a day at each of `--fees`; `--by-day` adds a table of the days
 for each run.
 
+What it gave on the 21 free days of Tardis.dev's recording of BTCUSDT (the first of each
+month, 2025-03-01 .. 2026-11-01), 0.001 a side, life 10 s, at most five orders held,
+latency 300 ms unless said: a backtest, and exploration, not a hypothesis written before
+it was run.
+
+| rule | break-even maker fee, bp (mean of days, standard error) |
+|------|------|
+| at the best prices, pessimistic queue | -1.417 (0.021) |
+| the same, proportional queue | -1.334 (0.019) |
+| the same, optimistic queue | -1.044 (0.022) |
+| latency 5 ms / 50 ms | -1.431 / -1.417 (0.019) |
+| OFI over 1 s beyond 1 | -1.428 (0.023) |
+| volatility gate over 1 m, quantile 0.5 / 0.8 of the hour before | -1.452 (0.034) / -1.433 (0.022) |
+| 0.5 / 1 / 2 bp from the mid | -1.402 (0.033) / -1.340 (0.043) / -1.208 (0.096) |
+
+No rule made money on a single day before fees. Almost all of the loss is what the
+position lost after its fills (`inventory`, about -1.3 bp of the traded notional in every
+rule): the price went on through the level that filled the order. The orders the gate
+kept out, in the busiest minutes, lost at the same rate as those it let through, so the
+gate traded less, not better. Orders away from the mid rested mostly at levels the book did
+not show (`unseen` 0.48, 0.85, 0.98), behind all of them, so those three rows are the
+pessimistic side; the gap between the queue modes at the best prices, 0.38 bp, is a guide
+to how far they may be. At a positive maker fee, the rule loses.
+
 `tests/test_strategy.py`: every order's fills are what the simulator gives it alone, at
 the price the rule gives from the best prices last seen, at them and away from them; the
 position never passes its limit and every decision knew it; the accounts add up; a day in
@@ -416,8 +440,10 @@ and runs the tests on each: all 45 are caught. For the protocol it adds 13 more:
 no embargo, every CPCV path through the same split, Newey-West without its lags, the IC on
 values instead of ranks, the held-out days used in the run, a shift surrogate that does not
 shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg, and others;
-and one for the bars, thresholds taken from totals instead of counted: 59 in all, all
-caught.
+and one for the bars, thresholds taken from totals instead of counted: 59. The later
+stages (point processes, the maker probe, the strategy and its gate, the archives, the
+trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
+it is compared with and a taker filled with no latency: 128 in all, each caught.
 
 ## Numbers
 
@@ -520,6 +546,30 @@ Benjamini-Hochberg over them. Until then the screen counts at p = 1 in the famil
 `tests/test_screen.py` works every signal out by hand, cuts days to show none reads a
 trade after its time (Hawkes included), takes a planted signal, refuses noise, and passes
 over a signal its surrogates refuse.
+
+`marketlab experiment list` shows, for each hypothesis, what its held-out days said:
+`confirmed k/n` for a screen or an edge, `opened` for the others, `-` before.
+
+### Does it pay what it costs: `kind: edge`
+
+A forecast can be real and still too small to trade. `experiments/007-flow-beats-cost.yaml`
+asks whether the signed flow points to moves larger than what a taker pays for them. The
+rule: at each time of the 5 s grid, with no position open, buy if the flow is above its
+95th percentile over the two hours before, sell if below its 5th; filled at the last
+trade price 300 ms later, closed at the last trade price a horizon later (1 to 60 min),
+one position at a time, none that would close after midnight. The mean over days of each
+day's mean signed return is the round-trip cost at which the rule breaks even, and the
+hypothesis names the cost it must beat: 9 bp, two taker fees of a regular Binance USD-M
+futures account paying in BNB. The development run scores all 32 combinations of flow and
+horizon, measures PBO over them, and takes, blindly, the one with the strongest evidence of
+beating the cost (the smallest one-sided p of its mean against it), if it beats the cost on
+enough days and its surrogates (the flow moved in time within its day by a random offset).
+Only that one goes to the held-out days, eight months of 2026 that no trade signal has read
+yet (less the first of each month, read before as Tardis.dev's futures days); if none is
+taken, they stay closed. `tests/test_edge.py` works the returns and the rule out by hand,
+cuts days to show no decision reads a trade after its time, finds a planted edge, does not
+find one where there is none or where the cost is above it, and passes over a combination
+its surrogates refuse.
 
 ## Tests
 

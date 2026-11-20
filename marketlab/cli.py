@@ -252,8 +252,8 @@ def print_report(r) -> None:
 
 
 def kind_of(spec_path: Path) -> str:
-    """A hypothesis's kind: `forecast` (the default), `maker`, `volatility`, `tradeflow` or
-    `screen`."""
+    """A hypothesis's kind: `forecast` (the default), `maker`, `volatility`, `tradeflow`,
+    `screen` or `edge`."""
     import yaml
 
     raw = yaml.safe_load(spec_path.read_text())
@@ -288,6 +288,54 @@ def print_screen_report(r) -> None:
         print(
             f"chosen {k}    {c['combination']}: IC {c['mean_ic']:.4f}, positive on "
             f"{c['positive_days']:.0%} of days; surrogates' {s.surrogate_percentile:g}th: {sur}"
+        )
+    print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
+
+
+def print_edge_report(r) -> None:
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    s = r.spec
+    print(f"experiment  {s.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    span = f"{r.days[0]} .. {r.days[-1]}" if r.days else "none"
+    print(
+        f"days        {len(r.days)} development, {span}; "
+        f"held out: {s.holdout[0]} .. {s.holdout[-1]} ({len(s.holdout)})"
+    )
+    if r.missing:
+        print(f"missing     {len(r.missing)} days: {', '.join(r.missing)}")
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    print(
+        f"rule        buy above the {s.quantile:g} quantile of the signal over the "
+        f"{s.lookback} before, sell below the {1 - s.quantile:.3g}; filled {s.latency} later "
+        f"at the last trade price, held for the horizon; every {s.sampling}"
+    )
+    print(f"cost        {s.cost_bp:g} bp a round trip; be_bp: the cost at which it breaks even")
+    t = pl.DataFrame(r.table).sort("be_bp", descending=True, nulls_last=True)
+    with _wide():
+        print(
+            t.select(
+                "combination",
+                pl.col("trades_day").round(1),
+                pl.col("be_bp").round(3),
+                pl.col("se").round(3),
+                pl.col("p_cost").round(4),
+                pl.col("positive_days").round(2),
+                pl.col("hit_rate").round(3),
+            )
+        )
+    if r.pbo:
+        print(f"pbo         {r.pbo.pbo:.2f} over the whole grid")
+    for c in r.passed_over:
+        print(f"refused     {c['combination']}: not above its surrogates")
+    for k, c in enumerate(r.chosen, 1):
+        th = c["surrogates"]["shift"]["threshold"]
+        print(
+            f"chosen {k}    {c['combination']}: {c['be_bp']:.3f} bp a trade, above the cost "
+            f"on {c['positive_days']:.0%} of days; surrogates' {s.surrogate_percentile:g}th: "
+            f"{th:.3f}"
         )
     print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
 
@@ -506,6 +554,32 @@ def cmd_experiment_run(a: argparse.Namespace) -> int:
             return 0
         report = screen.run(spec, a.data, results, cache, workers=a.workers)
         print_screen_report(report)
+        print(f"written     {results / (spec.slug + '.json')}")
+        return 0
+    if kind == "edge":
+        from . import edge
+
+        spec = edge.load_spec(spec_path)
+        results = _repo_dir(spec_path, "results", a.results)
+        cache = _repo_dir(spec_path, ".cache", a.cache)
+        if a.final:
+            rec = edge.final(spec, a.data, results, cache, workers=a.workers)
+            print(f"held out    {len(rec['days'])} days: opened once, now recorded")
+            if rec["missing"]:
+                print(f"missing     {len(rec['missing'])} days: {', '.join(rec['missing'])}")
+            for c in rec["chosen"]:
+                be = c["be_bp"]
+                print(
+                    f"            {c['combination']}: {be:.3f} +- {c['se']:.3f} bp a trade "
+                    f"against a cost of {rec['cost_bp']:g}, p (BH over {len(rec['chosen'])}) "
+                    f"{c['p_bh']:.3g}, above the cost on {c['positive_days']:.0%} of days: "
+                    + ("confirmed" if c["confirmed"] else "not confirmed")
+                    if be is not None and c["se"] is not None
+                    else f"            {c['combination']}: -"
+                )
+            return 0
+        report = edge.run(spec, a.data, results, cache, workers=a.workers)
+        print_edge_report(report)
         print(f"written     {results / (spec.slug + '.json')}")
         return 0
     if kind == "tradeflow":

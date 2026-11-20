@@ -710,6 +710,7 @@ def registry_table(results: Path, experiments: Path | None = None) -> pl.DataFra
             if slug not in seen:
                 id_, name = slug.split("-", 1)
                 rows.append({"id": id_, "name": name, "verdict": "not run", "p_raw": None})
+    held = [_held_out(results / f"{r['id']}-{r['name']}.holdout.json") for r in rows]
     if not rows:
         return pl.DataFrame(
             schema={
@@ -718,6 +719,7 @@ def registry_table(results: Path, experiments: Path | None = None) -> pl.DataFra
                 "verdict": pl.String,
                 "p_raw": pl.Float64,
                 "p_bh": pl.Float64,
+                "held_out": pl.String,
                 "dirty": pl.Boolean,
             }
         )
@@ -730,9 +732,25 @@ def registry_table(results: Path, experiments: Path | None = None) -> pl.DataFra
             "verdict": [r["verdict"] for r in rows],
             "p_raw": [r.get("p_raw") for r in rows],
             "p_bh": adj.tolist(),
+            "held_out": held,
             "dirty": [bool(r.get("dirty")) for r in rows],
         }
     )
+
+
+def _held_out(path: Path) -> str:
+    """What the held-out days said: for a screen or an edge, how many of the chosen were
+    confirmed; for the others, that they were opened ("-": not yet)."""
+    if not path.exists():
+        return "-"
+    try:
+        rec = json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return "unreadable"
+    chosen = rec.get("chosen") if isinstance(rec, dict) else None
+    if isinstance(chosen, list):
+        return f"confirmed {sum(bool(c.get('confirmed')) for c in chosen)}/{len(chosen)}"
+    return "opened"
 
 
 # --- the held-out days -------------------------------------------------------------------

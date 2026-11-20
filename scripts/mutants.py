@@ -198,8 +198,8 @@ M = [
     ),
     (
         "marketlab/execution/sim.py",
-        '    ahead = max(level - int(tr["qty"][seen][early].sum()), 0)',
-        "    ahead = level",
+        '    ahead = 0 if hidden else max(level - int(tr["qty"][seen][early].sum()), 0)',
+        "    ahead = 0 if hidden else level",
         "queue ignores trades seen by the arrival",
     ),
     (
@@ -671,6 +671,54 @@ M = [
         "            for b in blocks:  # withdrawn as soon as the first of them turns against it",
         "            for b in blocks[:1]:",
         "an order left out while the gate turns high beside the signal",
+    ),
+    (
+        "marketlab/edge.py",
+        "s = pl.Series(np.asarray(x, dtype=np.float64)).fill_nan(None).shift(1)",
+        "s = pl.Series(np.asarray(x, dtype=np.float64)).fill_nan(None)",
+        "the edge's threshold counts the time it is compared at",
+    ),
+    (
+        "marketlab/edge.py",
+        "    at = grid + duration_ns(spec.latency)\n",
+        "    at = grid\n",
+        "a taker filled at the price of its decision, with no latency",
+    ),
+    (
+        "marketlab/edge.py",
+        '        k = int(np.searchsorted(at, at[k] + hold, side="left"))',
+        "        k += 1",
+        "positions of the edge rule on top of one another",
+    ),
+    (
+        "marketlab/edge.py",
+        '        cols[f"open_{h}"] = out <= start + NS_DAY',
+        '        cols[f"open_{h}"] = np.ones(len(out), dtype=bool)',
+        "positions opened that close after midnight",
+    ),
+    (
+        "marketlab/edge.py",
+        "    p = float(stats.t.sf((mean - cost) / se, n - 1)) if n > 1 and se > 0 else nan",
+        "    p = float(stats.t.sf(mean / se, n - 1)) if n > 1 and se > 0 else nan",
+        "the edge tested against nothing instead of its cost",
+    ),
+    (
+        "marketlab/edge.py",
+        '        if threshold is not None and row["be_bp"] > threshold:',
+        "        if True:",
+        "the edge takes a combination its surrogates refuse",
+    ),
+    (
+        "marketlab/edge.py",
+        '    g = side[rows] * df[f"gross_{c.horizon}"].to_numpy()[rows]',
+        '    g = np.abs(df[f"gross_{c.horizon}"].to_numpy()[rows])',
+        "the edge's gross without the side of the trade",
+    ),
+    (
+        "marketlab/edge.py",
+        '        if row["be_bp"] is None or row["be_bp"] <= spec.cost_bp:\n            continue',
+        '        if row["be_bp"] is None:\n            continue',
+        "the edge takes a combination below its cost",
     ),
     (
         "marketlab/execution/sim.py",

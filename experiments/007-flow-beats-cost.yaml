@@ -1,0 +1,58 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+# Written after the maker strategy was found to lose on every rule tried (README, Strategy)
+# and after hypotheses 005 and 006 on the same development days; before any day of the
+# held-out months was downloaded or read for a trade signal.
+id: "007"
+name: flow-beats-cost
+kind: edge
+hypothesis: >
+  On BTCUSDT spot, a taker who buys when the signed flow is above its 95th percentile of
+  the two hours before, sells when it is below its 5th, and holds for a fixed horizon earns
+  more than 9 bp a round trip for at least one combination of flow and horizon below,
+  chosen by the rule written here; and that combination earns more than 9 bp a round trip
+  on the held-out days.
+
+data:
+  kind: aggTrades
+  market: spot
+  symbol: BTCUSDT
+  days: {from: 2026-09-01, to: 2026-11-18}     # the development days of 005 and 006
+  holdout:                                      # opened once, for the chosen only
+    from: 2026-01-01
+    to: 2026-08-31
+    # read before as days of Tardis.dev's futures recording, for hypotheses 001 .. 004 and
+    # the maker strategy: left out
+    except: [2026-01-01, 2026-02-01, 2026-03-01, 2026-04-01,
+             2026-05-01, 2026-06-01, 2026-07-01, 2026-08-01]
+  min_days: 60
+  confirm: december      # then once more on December, not recorded yet: a hypothesis of its own
+
+sampling: 5s
+
+signals:                 # from the trades at or before each time only
+  - {method: signed_volume, windows: [100t, 30s, 5m, 15m]}   # buys minus sells, base units
+  - {method: signed_count, windows: [100t, 30s, 5m, 15m]}    # buy orders minus sell orders
+horizons: [1m, 5m, 15m, 60m]
+
+rule:
+  quantile: 0.95         # buy above it, sell below 1 - it
+  lookback: 2h           # the quantile over the two hours before; none in the first hour
+  latency: 300ms         # filled at the last trade price this long after the decision
+
+# Both legs taker, at the fee of a regular account on Binance's USD-M futures paying fees
+# in BNB: 0.05% less 10%, 4.5 bp a leg (Binance's fee page, updated 2026-05-01, read
+# 2026-11-20). The same account on spot pays 0.1% less 25%, 15 bp a round trip.
+cost_bp: 9
+
+selection:               # written now, applied blindly after the development run
+  rank_by: p_cost        # the strongest evidence of beating the cost first, not the largest mean
+  require: {positive_days: 0.6, surrogates_above: 95}
+  take: 1
+
+protocol:
+  surrogates: 200
+  seed: 7
+
+success:
+  max_pbo: 0.5           # over all 32 combinations: 8 flows x 4 horizons
+  alpha: 0.05            # one-sided, the mean over held-out days above the cost
