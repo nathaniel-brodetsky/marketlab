@@ -740,7 +740,8 @@ def registry_table(results: Path, experiments: Path | None = None) -> pl.DataFra
 
 def _held_out(path: Path) -> str:
     """What the held-out days said: for a screen or an edge, how many of the chosen were
-    confirmed; for the others, that they were opened ("-": not yet)."""
+    confirmed; for a carry, whether it was; for the others, that they were opened ("-": not
+    yet)."""
     if not path.exists():
         return "-"
     try:
@@ -750,6 +751,8 @@ def _held_out(path: Path) -> str:
     chosen = rec.get("chosen") if isinstance(rec, dict) else None
     if isinstance(chosen, list):
         return f"confirmed {sum(bool(c.get('confirmed')) for c in chosen)}/{len(chosen)}"
+    if isinstance(rec, dict) and isinstance(rec.get("confirmed"), bool):
+        return "confirmed" if rec["confirmed"] else "not confirmed"
     return "opened"
 
 

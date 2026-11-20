@@ -253,7 +253,7 @@ def print_report(r) -> None:
 
 def kind_of(spec_path: Path) -> str:
     """A hypothesis's kind: `forecast` (the default), `maker`, `volatility`, `tradeflow`,
-    `screen` or `edge`."""
+    `screen`, `edge` or `carry`."""
     import yaml
 
     raw = yaml.safe_load(spec_path.read_text())
@@ -289,6 +289,39 @@ def print_screen_report(r) -> None:
             f"chosen {k}    {c['combination']}: IC {c['mean_ic']:.4f}, positive on "
             f"{c['positive_days']:.0%} of days; surrogates' {s.surrogate_percentile:g}th: {sur}"
         )
+    print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
+
+
+def print_carry_report(r) -> None:
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    s = r.spec
+    print(f"experiment  {s.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    print(
+        f"period      {s.first} .. {s.last}: {r.settlements} funding settlements; held out: "
+        f"{s.holdout_first} .. {s.holdout_last}"
+    )
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    if r.filled:
+        print(f"prices      {r.filled} taken from the bar before (no bar at the settlement)")
+    print(
+        f"position    long spot, short the perpetual, while the mean funding rate of the last "
+        f"settlements is above the threshold; costs {s.spot_bp:g} + {s.perp_bp:g} bp a leg, "
+        f"in and out"
+    )
+    cols = ["rule", "mean_bp", "annual_pct", "sharpe", "max_drawdown_bp", "held", "entries",
+            "funding_bp_year", "basis_bp_year", "fees_bp_year", "positive_months", "p"]  # fmt: skip
+    rows = [{k: x[k] for k in cols} for x in r.table]
+    rows.append({k: r.always.get(k) for k in cols} | {"rule": "always held"})
+    t = pl.DataFrame(rows).with_columns(pl.col(pl.Float64).round(3))
+    with _wide():
+        print(t)
+    print(f"primary     {s.primary.name} (first row); mean_bp a day, net of costs")
+    if r.pbo:
+        print(f"pbo         {r.pbo.pbo:.2f} over the {len(s.variants)} rules, by month")
+    print(f"p (BH)      {r.p_bh:.3g} over every hypothesis written")
     print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
 
 
@@ -554,6 +587,30 @@ def cmd_experiment_run(a: argparse.Namespace) -> int:
             return 0
         report = screen.run(spec, a.data, results, cache, workers=a.workers)
         print_screen_report(report)
+        print(f"written     {results / (spec.slug + '.json')}")
+        return 0
+    if kind == "carry":
+        from . import carry
+
+        spec = carry.load_spec(spec_path)
+        results = _repo_dir(spec_path, "results", a.results)
+        if a.final:
+            rec = carry.final(spec, a.data, results)
+            x = rec["summary"]
+            first, last = rec["period"]
+            print(f"held out    {first} .. {last}: opened once, now recorded")
+            print(
+                f"            {rec['rule']}: {x['mean_bp']:.3f} +- {x['se']:.3f} bp a day, "
+                f"{x['annual_pct']:.2f}% a year, Sharpe {x['sharpe']:.2f}, max drawdown "
+                f"{x['max_drawdown_bp']:.0f} bp, held {x['held']:.0%}, p {x['p']:.3g}: "
+                + ("confirmed" if rec["confirmed"] else "not confirmed")
+            )
+            a_ = rec["always_held"]
+            print(f"            always held: {a_['annual_pct']:.2f}% a year, max drawdown "
+                  f"{a_['max_drawdown_bp']:.0f} bp")  # fmt: skip
+            return 0
+        report = carry.run(spec, a.data, results)
+        print_carry_report(report)
         print(f"written     {results / (spec.slug + '.json')}")
         return 0
     if kind == "edge":

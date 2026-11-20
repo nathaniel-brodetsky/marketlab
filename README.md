@@ -443,7 +443,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 128 in all, each caught.
+it is compared with and a taker filled with no latency: 138 in all, each caught.
 
 ## Numbers
 
@@ -507,7 +507,14 @@ or failed its check; a day not published yet is skipped. Standard library only, 
 on any machine with Python 3.9 or newer. The archives hold trades without the order book:
 enough for hypotheses on trades alone (intensity, VPIN, volatility, trade clocks), not for
 order-flow imbalance or the fill simulator. Spot timestamps are in microseconds from
-2025-01-01, in milliseconds before.
+2025-01-01, in milliseconds before. `--kind klines --interval 1h --monthly` fetches price
+bars a month a file (`binance-data/<market>/klines/<SYMBOL>/1h/`).
+
+`python scripts/fetch_funding.py --start 2019-09-01 --end 2026-10-31` writes the funding
+history of a USD-M perpetual to `binance-data/um/fundingRate/<SYMBOL>/<SYMBOL>-fundingRate.csv`,
+from Binance's public market-data endpoint `/fapi/v1/fundingRate` (no key, no account), a
+thousand settlements a request; run again, it asks only for what comes after its last row.
+`tests/test_fetch.py` runs both scripts against a local server.
 
 `marketlab archive check [binance-data]` then checks the downloaded days before any
 research touches them, without looking at returns: aggregate ids that skip, raw trade ids
@@ -570,6 +577,24 @@ taken, they stay closed. `tests/test_edge.py` works the returns and the rule out
 cuts days to show no decision reads a trade after its time, finds a planted edge, does not
 find one where there is none or where the cost is above it, and passes over a combination
 its surrogates refuse.
+
+### Funding carry: `kind: carry`
+
+`experiments/008-funding-carry.yaml` leaves the short horizons: it holds BTC on spot
+against an equal short in the perpetual and collects the funding, a position held for days
+so that its fees, 24 bp in and out at a regular account's taker rates, are spread over many
+settlements. The rule decides only at a settlement: hold over the next period while the
+mean rate of the last 21 settlements is above zero, opening and closing at the open of the
+hour bar that starts then. The P&L, in bp of the notional at the opening, is the funding
+received (at Binance's mark price), the change of the basis between the two legs, and the
+fees; by UTC day, tested for a mean above zero with Newey-West errors, PBO over twelve
+rules by month, Benjamini-Hochberg over every hypothesis written. Development October 2019
+.. December 2023; held out, once, January 2024 .. October 2026. Not modelled: the margin
+the short leg needs and its liquidation in a rally, the exchange's own risk, and the
+capital tied in both legs, so the return per notional is above the return on the capital.
+`tests/test_carry.py` reads the archives in either time unit, works the money of a rule
+out by hand, shows no decision changes with what comes after it, finds a planted carry and
+none where the rate averages nil, and opens the held-out period once.
 
 ## Tests
 

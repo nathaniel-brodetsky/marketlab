@@ -1,0 +1,49 @@
+# Written before the first run and committed; `marketlab experiment run` refuses it changed.
+# Written after hypothesis 007 found that no trade-flow rule pays a taker's fees within an
+# hour, and before any funding rate or kline of these periods was downloaded or read here.
+# The carry is not new: the BIS (Working Paper 1087, "Crypto carry", 2023) documents it, and
+# its being paid in the bull market of 2021 is widely known. What is tested is whether it
+# pays a regular account, after its fees, and whether it still did over 2024 .. 2026.
+id: "008"
+name: funding-carry
+kind: carry
+hypothesis: >
+  Holding BTC on Binance spot against an equal short in the BTCUSDT USD-M perpetual while
+  the mean funding rate of the last 21 settlements (seven days) is above zero, opening and
+  closing right after a settlement with taker orders on both legs, earns more than zero a
+  day after fees, on the development period and on the held-out one.
+
+data:
+  symbol: BTCUSDT
+  interval: 1h            # the open of the hour bar that starts at the settlement
+  days: {from: 2019-10-01, to: 2023-12-31}
+  holdout: {from: 2024-01-01, to: 2026-10-31}   # opened once, for the primary rule only
+
+rule:                     # the primary: written now, not chosen from the variants
+  lookback: 21            # settlements: seven days at one every eight hours
+  threshold_bp: 0.0       # per settlement
+
+# A leg, both ways, a regular account paying fees in BNB (Binance's fee pages read
+# 2026-11-20): spot 0.1% less 25%, USD-M futures taker 0.05% less 10%. In and out: 24 bp.
+costs: {spot_bp: 7.5, perp_bp: 4.5}
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {lookback: 3}
+  - {lookback: 9}
+  - {lookback: 63}
+  - {lookback: 3, threshold_bp: 0.5}
+  - {lookback: 9, threshold_bp: 0.5}
+  - {lookback: 21, threshold_bp: 0.5}
+  - {lookback: 63, threshold_bp: 0.5}
+  - {lookback: 3, threshold_bp: 1.0}   # 1 bp: Binance's rate when the premium is nil
+  - {lookback: 9, threshold_bp: 1.0}
+  - {lookback: 21, threshold_bp: 1.0}
+  - {lookback: 63, threshold_bp: 1.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided, after Benjamini-Hochberg over every hypothesis written
+  max_pbo: 0.5            # over the 12 rules, by month
+  min_positive_months: 0.6
