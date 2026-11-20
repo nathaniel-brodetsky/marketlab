@@ -311,7 +311,7 @@ def print_carry_report(r) -> None:
         f"settlements is above the threshold; costs {s.spot_bp:g} + {s.perp_bp:g} bp a leg, "
         f"in and out"
     )
-    cols = ["rule", "mean_bp", "annual_pct", "sharpe", "max_drawdown_bp", "held", "entries",
+    cols = ["rule", "mean_bp", "annual_pct", "sharpe_months", "max_drawdown_bp", "held", "entries",
             "funding_bp_year", "basis_bp_year", "fees_bp_year", "positive_months", "p"]  # fmt: skip
     rows = [{k: x[k] for k in cols} for x in r.table]
     rows.append({k: r.always.get(k) for k in cols} | {"rule": "always held"})
@@ -323,6 +323,48 @@ def print_carry_report(r) -> None:
         print(f"pbo         {r.pbo.pbo:.2f} over the {len(s.variants)} rules, by month")
     print(f"p (BH)      {r.p_bh:.3g} over every hypothesis written")
     print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
+
+
+def cmd_carry_report(a: argparse.Namespace) -> int:
+    from . import carry
+
+    spec_path = Path(a.spec)
+    spec = carry.load_spec(spec_path)
+    results = _repo_dir(spec_path, "results", a.results)
+    rf = carry.read_riskfree(a.riskfree) if a.riskfree else None
+    rep = carry.report(spec, a.data, results, a.leverage, rf, a.mmr)
+    for name, r in rep.items():
+        print(
+            f"\n{name:<11} {r['first']} .. {r['last']}, {r['rule']}; capital "
+            f"{r['capital']:g} x the notional (the spot leg and the short's margin at leverage "
+            f"{r['leverage']:g})"
+        )
+        t = pl.DataFrame([*r["years"], r["all"]], infer_schema_length=None)
+        with _wide():
+            print(t.with_columns(pl.col(pl.Float64).round(2)))
+        over = r["sharpe_months_over_bills"]
+        print(
+            f"sharpe      from months: {r['sharpe_months']:.2f}"
+            + (f"; on the capital, over the bills: {over:.2f}" if over is not None else "")
+        )
+        worst = ", ".join(f"{w['month']} {w['net_bp']:+.0f} bp" for w in r["worst_months"])
+        print(f"worst       months: {worst}")
+        rises = ", ".join(f"{k} {v:.1%}" for k, v in r["rises"].items())
+        lev = ", ".join(f"{k} {v:.2f}x" for k, v in r["survives"].items())
+        print(f"rises       the perpetual's largest rise while held, within: {rises}")
+        print(
+            f"leverage    the short leg survives that with its margin topped up every: {lev} "
+            f"(maintenance margin {r['mmr_pct']:g}%)"
+        )
+    if "held out" not in rep:
+        print("\nheld out    not opened yet: `marketlab experiment run SPEC --final` first")
+    print(
+        "\ncarry_pct, always_pct: % a year of the notional, the primary rule and holding always; "
+        "bills_pct: the risk-free rate given (--riskfree); on_capital_pct: the primary's return "
+        "on the capital it needs; over_bills_pct: that less the bills. Not modelled: the "
+        "exchange's own risk, auto-deleveraging, slippage, moving margin between the legs"
+    )
+    return 0
 
 
 def print_edge_report(r) -> None:
@@ -601,7 +643,8 @@ def cmd_experiment_run(a: argparse.Namespace) -> int:
             print(f"held out    {first} .. {last}: opened once, now recorded")
             print(
                 f"            {rec['rule']}: {x['mean_bp']:.3f} +- {x['se']:.3f} bp a day, "
-                f"{x['annual_pct']:.2f}% a year, Sharpe {x['sharpe']:.2f}, max drawdown "
+                f"{x['annual_pct']:.2f}% a year, Sharpe {x['sharpe_months']:.2f} from months, "
+                f"max drawdown "
                 f"{x['max_drawdown_bp']:.0f} bp, held {x['held']:.0%}, p {x['p']:.3g}: "
                 + ("confirmed" if rec["confirmed"] else "not confirmed")
             )
@@ -1004,6 +1047,26 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
     g.add_argument("--out", help="per-day table to this .csv or .parquet file")
     g.set_defaults(run=cmd_strategy)
+
+    c = sub.add_parser(
+        "carry-report",
+        help="a carry hypothesis after its verdict: by year, against bills, on capital, margin",
+    )
+    c.add_argument("spec", help="a committed experiments/NNN-name.yaml of kind carry")
+    c.add_argument("--data", required=True, help="e.g. binance-data")
+    c.add_argument("--results", help="default: results/ next to experiments/")
+    c.add_argument(
+        "--leverage", type=float, default=2.0, help="of the short leg, for the capital (default 2)"
+    )
+    c.add_argument(
+        "--riskfree",
+        help="CSV of date and rate in %% a year, e.g. binance-data/fred/GS3M.csv from "
+        "scripts/fetch_fred.py",
+    )
+    c.add_argument(
+        "--mmr", type=float, default=0.4, help="maintenance margin, %% of notional (default 0.4)"
+    )
+    c.set_defaults(run=cmd_carry_report)
 
     r = sub.add_parser(
         "archive", help="Binance public trade archives from scripts/fetch_binance.py"

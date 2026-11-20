@@ -156,3 +156,19 @@ def test_the_funding_history_a_page_at_a_time(server, tmp_path, capsys):
     with pytest.raises(SystemExit, match="not a file this script wrote"):
         f.write_text("time,rate\n1,2\n")
         ff.main(args)
+
+
+ff_red = _load("fetch_fred")
+
+
+def test_a_fred_series(server, tmp_path, capsys):
+    text = "observation_date,GS3M\n2024-01-01,5.37\n2024-02-01,.\n2024-03-01,5.25\n"
+    server.files["/graph/fredgraph.csv"] = text.encode()
+    assert ff_red.main(["--out", str(tmp_path), "--base-url", server.url]) == 0
+    f = tmp_path / "fred" / "GS3M.csv"
+    assert f.read_text() == text
+    assert "GS3M: 2 values, 2024-01-01 .. 2024-03-01" in capsys.readouterr().out
+    assert server.calls[-1] == "/graph/fredgraph.csv?id=GS3M"
+    server.files["/graph/fredgraph.csv"] = b"<html>not a csv</html>"
+    assert ff_red.main(["--out", str(tmp_path), "--base-url", server.url]) == 1
+    assert f.read_text() == text  # a bad answer does not replace a good file

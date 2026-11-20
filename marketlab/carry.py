@@ -28,10 +28,12 @@ ROOT/{spot,um}/klines/<SYMBOL>/<interval>/<SYMBOL>-<interval>-YYYY-MM.zip.
 
 from __future__ import annotations
 
+import csv
 import datetime as dt
 import io
 import json
 import zipfile
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -159,7 +161,8 @@ def _ns(t: np.ndarray) -> np.ndarray:
 
 
 def read_klines(root: str | Path, market: str, symbol: str, interval: str) -> pl.DataFrame:
-    """Every monthly file there is: open_time (ns), open and close, by time, once each."""
+    """Every monthly file there is: open_time (ns), open, high and close, by time, once
+    each."""
     folder = Path(root) / market / "klines" / symbol / interval
     parts = []
     for f in sorted(folder.glob(f"{symbol}-{interval}-*.zip")):
@@ -174,11 +177,13 @@ def read_klines(root: str | Path, market: str, symbol: str, interval: str) -> pl
             df.select(
                 pl.col("open_time").cast(pl.Int64),
                 pl.col("open").cast(pl.Float64),
+                pl.col("high").cast(pl.Float64),
                 pl.col("close").cast(pl.Float64),
             )
         )
     if not parts:
-        return pl.DataFrame(schema={"open_time": pl.Int64, "open": pl.Float64, "close": pl.Float64})
+        schema = {"open_time": pl.Int64, "open": pl.Float64, "high": pl.Float64}
+        return pl.DataFrame(schema=schema | {"close": pl.Float64})
     df = pl.concat(parts)
     return (
         df.with_columns(pl.Series("open_time", _ns(df["open_time"].to_numpy())))
@@ -224,6 +229,20 @@ def price_at(bars: pl.DataFrame, t: np.ndarray, interval: str) -> tuple[np.ndarr
     return out, int(ok.sum())
 
 
+def highest(bars: pl.DataFrame, t: np.ndarray, interval: str) -> np.ndarray:
+    """For each settlement, the highest price of the bars from it to the next one (NaN after
+    the last, or where there is no bar)."""
+    step = duration_ns(interval)
+    start = t // step * step
+    ot, hg = bars["open_time"].to_numpy(), bars["high"].to_numpy()
+    lo = np.searchsorted(ot, start)
+    hi = np.searchsorted(ot, np.append(start[1:], start[-1:]))
+    out = np.full(len(t), np.nan)
+    for k in np.flatnonzero(hi > lo):
+        out[k] = hg[lo[k] : hi[k]].max()
+    return out
+
+
 @dataclass
 class Market:
     """Every settlement with the rate, and the spot and perpetual prices right after it."""
@@ -234,16 +253,19 @@ class Market:
     perp: np.ndarray
     mark: np.ndarray  # for the funding payment: Binance's mark price, else the perpetual's
     filled: int = 0  # prices taken from the bar before
+    high: np.ndarray | None = None  # the perpetual's highest from each settlement to the next
 
     @classmethod
     def load(cls, root: str | Path, spec: Spec) -> Market:
         f = read_funding(root, spec.symbol)
         t = f["time"].to_numpy()
         spot, a = price_at(read_klines(root, "spot", spec.symbol, spec.interval), t, spec.interval)
-        perp, b = price_at(read_klines(root, "um", spec.symbol, spec.interval), t, spec.interval)
+        um = read_klines(root, "um", spec.symbol, spec.interval)
+        perp, b = price_at(um, t, spec.interval)
         mark = f["mark"].to_numpy()
         mark = np.where(np.isfinite(mark) & (mark > 0), mark, perp)
-        return cls(t, f["rate"].to_numpy(), spot, perp, mark, a + b)
+        high = highest(um, t, spec.interval) if len(t) else np.zeros(0)
+        return cls(t, f["rate"].to_numpy(), spot, perp, mark, a + b, high)
 
 
 # --- the rule ----------------------------------------------------------------------------
@@ -330,7 +352,7 @@ class Score:
     se: float  # Newey-West
     p: float  # one-sided: the mean above zero
     annual_pct: float
-    sharpe: float  # a year
+    sharpe_months: float  # from monthly sums, a year: daily ones overstate it, being related
     max_drawdown_bp: float
     held: float  # share of the settlement periods with the position
     entries: int
@@ -349,7 +371,6 @@ def score(d: pl.DataFrame, p: Path_, lags: int) -> Score:
     years = n / 365.0
     se = metrics.newey_west_se(x, lags)
     mean = float(x.mean()) if n else float("nan")
-    sd = float(x.std(ddof=1)) if n > 1 else float("nan")
     cum = np.cumsum(x)
     peak = np.maximum.accumulate(np.concatenate([[0.0], cum]))[1:]
     months = monthly(d)
@@ -359,7 +380,7 @@ def score(d: pl.DataFrame, p: Path_, lags: int) -> Score:
         se=se,
         p=float(stats.norm.sf(mean / se)) if se > 0 else float("nan"),
         annual_pct=mean * 365 / 100,
-        sharpe=mean / sd * np.sqrt(365) if sd > 0 else float("nan"),
+        sharpe_months=_sharpe(months["net"].to_numpy()),
         max_drawdown_bp=float((peak - cum).max()) if n else float("nan"),
         held=float(p.held[:-1].mean()) if len(p.held) > 1 else float("nan"),
         entries=p.entries,
@@ -368,6 +389,12 @@ def score(d: pl.DataFrame, p: Path_, lags: int) -> Score:
         fees_bp_year=float(d["fees"].sum()) / years if n else float("nan"),
         positive_months=float((months["net"] > 0).mean()) if len(months) else float("nan"),
     )
+
+
+def _sharpe(monthly_bp: np.ndarray) -> float:
+    if len(monthly_bp) < 2 or not monthly_bp.std(ddof=1) > 0:
+        return float("nan")
+    return float(monthly_bp.mean() / monthly_bp.std(ddof=1) * np.sqrt(12))
 
 
 def monthly(d: pl.DataFrame) -> pl.DataFrame:
@@ -533,3 +560,150 @@ def final(
     results.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(record, indent=1) + "\n")
     return record
+
+
+# --- a fuller report, once the verdict is recorded --------------------------------------------
+
+#: Binance's maintenance margin for BTCUSDT's first tier, % of the notional (its current tiers
+#: are on its site; a larger position falls in a higher tier, with more)
+MMR_PCT = 0.4
+WINDOWS = {"8h": 1, "day": 3, "week": 21}  # in settlement periods
+
+
+def read_riskfree(path: str | Path) -> dict[str, float]:
+    """A rate in % a year by month (YYYY-MM), from a CSV of date and value, such as FRED's
+    download of GS3M (a header line or not; "." where there is no value); a daily series is
+    averaged over each month."""
+    sums: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    with Path(path).open(newline="") as f:
+        for row in csv.reader(f):
+            if len(row) < 2:
+                continue
+            try:
+                d = dt.date.fromisoformat(row[0].strip()[:10])
+                v = float(row[1])
+            except ValueError:
+                continue  # the header, or a missing value
+            k = d.isoformat()[:7]
+            sums[k] = sums.get(k, 0.0) + v
+            counts[k] = counts.get(k, 0) + 1
+    if not sums:
+        raise ex.ExperimentError(f"{path}: no dated rates in it")
+    return {k: sums[k] / counts[k] for k in sorted(sums)}
+
+
+def rises(m: Market, p: Path_) -> dict[str, float]:
+    """The largest rise of the perpetual from its price at a settlement where the position was
+    taken or held, to its highest over the next 8 h, day or week: what the short leg's margin
+    must absorb if it is topped up that often."""
+    if m.high is None:
+        raise ex.ExperimentError("no highs in the market: load it from the archives")
+    starts = p.rows[p.held]
+    out = {}
+    for name, w in WINDOWS.items():
+        high = np.where(np.isfinite(m.high), m.high, -np.inf)
+        pad = np.concatenate([high, np.full(w, -np.inf)])
+        windows = np.lib.stride_tricks.sliding_window_view(pad, w)[: len(high)]
+        top = windows[starts].max(axis=1) if len(starts) else np.zeros(0)
+        r = top / m.perp[starts] - 1
+        r = r[np.isfinite(r)]
+        out[name] = float(r.max()) if len(r) else float("nan")
+    return out
+
+
+def survives(rise: float, mmr_pct: float = MMR_PCT) -> float:
+    """The highest leverage of the short leg whose margin a rise of `rise` leaves above the
+    maintenance margin."""
+    return 1.0 / (rise + mmr_pct / 100) if rise + mmr_pct / 100 > 0 else float("inf")
+
+
+def _bills_bp(dates: Sequence[str], rf: dict[str, float] | None) -> np.ndarray:
+    """The bills' rate of each day, in bp of the day (NaN for a month not in `rf`)."""
+    if rf is None:
+        return np.full(len(dates), np.nan)
+    return np.array([rf.get(d[:7], np.nan) * 100 / 365 for d in dates])
+
+
+def period_report(
+    m: Market,
+    spec: Spec,
+    first: str,
+    last: str,
+    leverage: float,
+    rf: dict[str, float] | None,
+    mmr_pct: float = MMR_PCT,
+) -> dict:
+    """The primary rule and holding always, over a period: by year, % a year of the notional,
+    the bills' rate, and the primary on the capital it needs, the spot leg and the short's
+    margin at `leverage`, over the bills; Sharpe from months, the worst months, and the rises
+    its margin must absorb."""
+    p, d = _period(m, spec, spec.primary, first, last)
+    _, da = _period(m, spec, ALWAYS, first, last)
+    capital = 1 + 1 / leverage
+    bills = _bills_bp(d["date"].to_list(), rf)
+    frame = d.select("date", "net").with_columns(
+        always=da["net"], bills=pl.Series(bills), year=pl.col("date").str.slice(0, 4)
+    )
+
+    def summary(g: pl.DataFrame, label: str) -> dict:
+        n = len(g)
+        carry = float(g["net"].sum()) / n * 365 / 100
+        bills_pct = float(g["bills"].mean()) * 365 / 100 if g["bills"].is_not_nan().all() else None
+        on_capital = carry / capital
+        return {
+            "year": label,
+            "days": n,
+            "carry_pct": carry,
+            "always_pct": float(g["always"].sum()) / n * 365 / 100,
+            "bills_pct": bills_pct,
+            "on_capital_pct": on_capital,
+            "over_bills_pct": on_capital - bills_pct if bills_pct is not None else None,
+        }
+
+    years = [summary(g, y) for (y,), g in frame.group_by("year", maintain_order=True)]
+    months = frame.group_by(pl.col("date").str.slice(0, 7).alias("month"), maintain_order=True).agg(
+        pl.col("net").sum(), pl.col("bills").sum()
+    )
+    excess = months["net"].to_numpy() / capital - months["bills"].to_numpy()
+    worst = months.sort("net").head(4)
+    r = rises(m, p)
+    return {
+        "first": first,
+        "last": last,
+        "rule": spec.primary.name,
+        "leverage": leverage,
+        "capital": capital,
+        "years": years,
+        "all": summary(frame, "all"),
+        "sharpe_months": _sharpe(months["net"].to_numpy()),
+        "sharpe_months_over_bills": _sharpe(excess) if np.isfinite(excess).all() else None,
+        "worst_months": [{"month": a, "net_bp": b} for a, b in worst.select("month", "net").rows()],
+        "rises": r,
+        "survives": {k: survives(v, mmr_pct) for k, v in r.items()},
+        "mmr_pct": mmr_pct,
+    }
+
+
+def report(
+    spec: Spec,
+    root: str | Path,
+    results: Path,
+    leverage: float = 2.0,
+    rf: dict[str, float] | None = None,
+    mmr_pct: float = MMR_PCT,
+    market: Market | None = None,
+) -> dict:
+    """The development period once its verdict is recorded; the held-out one too once it has
+    been opened. Nothing here changes a verdict: it describes what was decided."""
+    if not (results / f"{spec.slug}.json").exists():
+        raise ex.ExperimentError(f"run {spec.slug} on the development days first")
+    if not leverage > 0:
+        raise ex.ExperimentError("leverage must be positive")
+    m = market or Market.load(root, spec)
+    out = {"development": period_report(m, spec, spec.first, spec.last, leverage, rf, mmr_pct)}
+    if (results / f"{spec.slug}.holdout.json").exists():
+        out["held out"] = period_report(
+            m, spec, spec.holdout_first, spec.holdout_last, leverage, rf, mmr_pct
+        )
+    return out

@@ -764,6 +764,36 @@ M = [
     ),
     (
         "marketlab/carry.py",
+        "        r = top / m.perp[starts] - 1",
+        "        r = top / m.high[starts] - 1",
+        "the carry's rise measured from the period's high",
+    ),
+    (
+        "marketlab/carry.py",
+        "    capital = 1 + 1 / leverage",
+        "    capital = 1.0",
+        "the carry's capital without the short's margin",
+    ),
+    (
+        "marketlab/carry.py",
+        '    if (results / f"{spec.slug}.holdout.json").exists():',
+        "    if True:",
+        "the carry report reads the held-out period before it is opened",
+    ),
+    (
+        "marketlab/carry.py",
+        '        sharpe_months=_sharpe(months["net"].to_numpy()),',
+        "        sharpe_months=float(x.mean() / x.std(ddof=1) * np.sqrt(365)),",
+        "the carry's Sharpe from days",
+    ),
+    (
+        "marketlab/carry.py",
+        "    hi = np.searchsorted(ot, np.append(start[1:], start[-1:]))",
+        '    hi = np.searchsorted(ot, np.append(start[1:], start[-1:]), side="right")',
+        "a period's high takes the bar of the next settlement",
+    ),
+    (
+        "marketlab/carry.py",
         '    out[ok] = bars["close"].to_numpy()[j[ok]]',
         '    out[ok] = bars["open"].to_numpy()[np.minimum(i[ok], len(ot) - 1)]',
         "a missing bar priced from the bar after it",

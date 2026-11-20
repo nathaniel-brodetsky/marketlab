@@ -268,3 +268,81 @@ def test_monthly_by_hand():
     m = carry.monthly(d)
     assert m.to_dicts() == [{"month": "2021-01", "net": -2.0, "mean": -1.0},
                             {"month": "2021-02", "net": 2.0, "mean": 2.0}]  # fmt: skip
+
+
+def test_highs_and_rises_by_hand():
+    # hourly bars; settlements every 8 h, the highest bar from each to the next
+    t0 = ms("2021-03-01")
+    t = np.arange(48) * H + t0
+    high = 100 + np.arange(48) % 17
+    bars = pl.DataFrame({"open_time": t * 1_000_000, "open": high - 1.0, "high": high * 1.0,
+                         "close": high - 0.5})  # fmt: skip
+    st = (np.arange(6) * 8 * H + t0 + 3) * 1_000_000
+    got = carry.highest(bars, st, "1h")
+    assert got[:5].tolist() == [high[8 * k : 8 * k + 8].max() for k in range(5)]
+    assert np.isnan(got[5])  # after the last settlement
+    perp = np.array([100.0, 101, 102, 103, 104, 105])
+    m = carry.Market(st, np.full(6, 1e-4), perp, perp, perp, 0, got)
+    p = carry.Path_(np.arange(6), np.zeros(6), np.zeros(6), np.zeros(6),
+                    np.array([False, True, True, False, False, False]), 1)  # fmt: skip
+    r = carry.rises(m, p)
+    assert r["8h"] == pytest.approx(max(got[1] / 101, got[2] / 102) - 1)
+    assert r["day"] == pytest.approx(max(got[1:4].max() / 101, got[2:5].max() / 102) - 1)
+    assert carry.survives(0.246, 0.4) == pytest.approx(4.0)
+
+
+def test_the_riskfree_file(tmp_path):
+    f = tmp_path / "GS3M.csv"
+    f.write_text("observation_date,GS3M\n2024-01-01,5.37\n2024-02-01,.\n2024-03-01,5.25\n")
+    assert carry.read_riskfree(f) == {"2024-01": 5.37, "2024-03": 5.25}
+    f.write_text("DATE,DGS3MO\n2024-01-02,5.0\n2024-01-03,5.2\n")  # daily: a month's mean
+    assert carry.read_riskfree(f) == {"2024-01": pytest.approx(5.1)}
+    f.write_text("nothing here\n")
+    with pytest.raises(ex.ExperimentError, match="no dated rates"):
+        carry.read_riskfree(f)
+
+
+def test_the_report_after_the_verdicts(tmp_path, capsys):
+    planted(tmp_path / "paid", 1.0, seed=1)
+    spec = carry.load_spec(spec_file(tmp_path))
+    results = tmp_path / "results"
+    with pytest.raises(ex.ExperimentError, match="development days first"):
+        carry.report(spec, tmp_path / "paid", results)
+    carry.run(spec, tmp_path / "paid", results, prov=PROV)
+    rf = {f"2021-{k:02d}": 2.0 for k in range(1, 13)} | {f"2022-{k:02d}": 3.0 for k in range(1, 7)}
+    rep = carry.report(spec, tmp_path / "paid", results, leverage=4.0, rf=rf)
+    assert list(rep) == ["development"]  # the held-out period is not opened by a report
+    d = rep["development"]
+    m = carry.Market.load(tmp_path / "paid", spec)
+    p, daily = carry._period(m, spec, spec.primary, spec.first, spec.last)
+    every = d["all"]
+    assert every["days"] == 365 and every["carry_pct"] == pytest.approx(daily["net"].sum() / 100)
+    assert every["bills_pct"] == pytest.approx(2.0)
+    assert every["on_capital_pct"] == pytest.approx(every["carry_pct"] / 1.25)
+    assert every["over_bills_pct"] == pytest.approx(every["carry_pct"] / 1.25 - 2.0)
+    assert [y["year"] for y in d["years"]] == ["2021"]
+    assert d["rises"] == carry.rises(m, p) and d["survives"]["week"] < d["survives"]["8h"]
+    assert len(d["worst_months"]) == 4
+    # Sharpe from monthly sums, not from days
+    sums = daily.group_by(pl.col("date").str.slice(0, 7)).agg(pl.col("net").sum())["net"]
+    by_hand = sums.mean() / sums.std() * 12**0.5
+    assert d["sharpe_months"] == pytest.approx(by_hand)
+    assert carry.score(daily, p, 10).sharpe_months == pytest.approx(by_hand)
+    carry.final(spec, tmp_path / "paid", results, prov=PROV)
+    rep = carry.report(spec, tmp_path / "paid", results, leverage=4.0, rf=rf)
+    held = rep["held out"]
+    assert held["all"]["days"] == 181 and held["all"]["bills_pct"] == pytest.approx(3.0)
+    # without a rate for every month, no comparison with the bills
+    rep = carry.report(spec, tmp_path / "paid", results, leverage=4.0, rf={"2021-01": 2.0})
+    assert rep["development"]["all"]["bills_pct"] is None
+    assert rep["development"]["sharpe_months_over_bills"] is None
+    from marketlab.cli import main
+
+    f = tmp_path / "GS3M.csv"
+    f.write_text("observation_date,GS3M\n" + "".join(f"{k}-01,2.5\n" for k in rf))
+    p = spec_file(tmp_path)
+    assert main(["carry-report", str(p), "--data", str(tmp_path / "paid"), "--results",
+                 str(results), "--riskfree", str(f), "--leverage", "3"]) == 0  # fmt: skip
+    out = capsys.readouterr().out
+    assert "development 2021-01-01 .. 2021-12-31" in out and "held out    2022-01-01" in out
+    assert "over_bills_pct" in out and "survives that with its margin" in out

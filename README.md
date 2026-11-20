@@ -443,7 +443,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 139 in all, each caught.
+it is compared with and a taker filled with no latency: 144 in all, each caught.
 
 ## Numbers
 
@@ -585,16 +585,47 @@ against an equal short in the perpetual and collects the funding, a position hel
 so that its fees, 24 bp in and out at a regular account's taker rates, are spread over many
 settlements. The rule decides only at a settlement: hold over the next period while the
 mean rate of the last 21 settlements is above zero, opening and closing at the open of the
-hour bar that starts then. The return, in bp of the notional at the start of each period, is the funding
-received (at Binance's mark price), the change of the basis between the two legs, and the
-fees; by UTC day, tested for a mean above zero with Newey-West errors, PBO over twelve
-rules by month, Benjamini-Hochberg over every hypothesis written. Development January 2020
-.. December 2023; held out, once, January 2024 .. October 2026. Not modelled: the margin
-the short leg needs and its liquidation in a rally, the exchange's own risk, and the
-capital tied in both legs, so the return per notional is above the return on the capital.
+hour bar that starts then. The return, in bp of the notional at the start of each period,
+is the funding received (at Binance's mark price), the change of the basis between the two
+legs, and the fees; by UTC day, tested for a mean above zero with Newey-West errors, PBO
+over twelve rules by month, Benjamini-Hochberg over every hypothesis written. Development
+January 2020 .. December 2023; held out, once, January 2024 .. October 2026. Sharpe ratios
+are from monthly sums: daily ones overstate it, the funding staying high or low for months.
+
+`marketlab carry-report SPEC --data binance-data --riskfree binance-data/fred/GS3M.csv`
+describes a carry once its verdict is recorded, the held-out period only once it has been
+opened: by year, the primary rule and holding always in % a year of the notional; the
+three-month Treasury bill's rate (`scripts/fetch_fred.py` downloads FRED's GS3M); the
+primary's return on the capital it needs, the spot leg and the short's margin at
+`--leverage`, and that over the bills; Sharpe from months, also over the bills; the worst
+months; and the largest rise of the perpetual within 8 h, a day and a week while the
+position was held, with the leverage at which the short leg survives it if its margin is
+topped up that often. Not modelled: the exchange's own risk, auto-deleveraging, slippage,
+and the moving of margin between the legs.
 `tests/test_carry.py` reads the archives in either time unit, works the money of a rule
-out by hand, shows no decision changes with what comes after it, finds a planted carry and
-none where the rate averages nil, and opens the held-out period once.
+out by hand, holds a year while the price triples, shows no decision changes with what
+comes after it, finds a planted carry and none where the rate averages nil, opens the
+held-out period once, and works the report's capital, bills, highs and rises out by hand.
+
+## What has been found
+
+Backtests on public data; each verdict as the protocol recorded it in `results/`.
+
+| hypothesis | verdict | in short |
+|------------|---------|----------|
+| 001 multi-level OFI over 1 s | passed | |
+| 002 maker withdrawing on OFI | failed | p 0.99 |
+| 003 Hawkes intensity for volatility | failed | p 0.066 after Benjamini-Hochberg |
+| 004 VPIN for volatility | failed | |
+| 005 trade flow over 100 trades, next 30 s | passed; held out opened | IC 0.091 developing, 0.057 held out, positive on all 21 held-out days |
+| 006 screen of 44 trade-only signals | screened, held out confirmed 3/3 | realized volatility over 5 and 1 min, intensity over 5 min, against the size of the next 30 s: IC 0.32 to 0.34 held out |
+| 007 trade flow against a taker's 9 bp | failed on development, held-out months not opened | best 3.1 +- 1.0 bp a trade (60 min) |
+| 008 funding carry, spot against the perpetual | passed, held out confirmed | 13.9% a year of the notional 2020 .. 2023 (16.6, 29.8, 2.1, 6.9 by year), 6.0% over January 2024 .. October 2026; holding always 6.9% |
+
+The order flow forecasts the next seconds and volatility forecasts the size of the next
+moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
+taker's (007). The carry is paid after fees, but since 2022 at about the rate of US
+Treasury bills (`carry-report`), with the exchange's risk and the short leg's margin on top.
 
 ## Tests
 
