@@ -811,6 +811,36 @@ M = [
         "the cost wall's hourly returns across a gap in the bars",
     ),
     (
+        "marketlab/xsection.py",
+        "    return r - np.nan_to_num(p.funding)",
+        "    return r + np.nan_to_num(p.funding)",
+        "a long paid the funding it pays",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        pnl[i + 1] += float((w * np.nan_to_num(r[i + 1])).sum())",
+        "        pnl[i] += float((w * np.nan_to_num(r[i])).sum())",
+        "the cross-section earns the day it decided on",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            pnl[i] -= turns[-1] * cost_bp / 2 / 1e4",
+        "            pnl[i] -= 0.0",
+        "the cross-section trades for free",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    if last > DEV_END:",
+        "    if False:",
+        "the cross-section reads the held-out years",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        span = lr[i + 1 : i + 1 + hold]",
+        "        span = lr[i : i + hold]",
+        "the cross-section's IC counts the day of the signal",
+    ),
+    (
         "marketlab/carry.py",
         '    out[ok] = bars["close"].to_numpy()[j[ok]]',
         '    out[ok] = bars["open"].to_numpy()[np.minimum(i[ok], len(ot) - 1)]',

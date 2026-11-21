@@ -443,7 +443,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 147 in all, each caught.
+it is compared with and a taker filled with no latency: 152 in all, each caught.
 
 ## Numbers
 
@@ -645,6 +645,31 @@ Above 1, no signal can pay. Returns and signal are taken as jointly normal: a wa
 deciding where to look, not a verdict on a signal; the protocol still decides those.
 `tests/test_costwall.py` works the needed IC out by hand and checks it on simulated
 signals, and works out the returns on a grid of trades and between hourly closes.
+
+## Many coins, a day at a time: a rough look
+
+`python scripts/fetch_universe.py --start 2020-01-01 --end 2026-10-31` downloads, from
+Binance's public endpoints, every USD-M perpetual quoted in USDT that Binance lists, of any
+status (`binance-data/um/universe.csv`), its daily bars (`um/klines1d/<SYMBOL>.csv`) and
+its funding history (as `fetch_funding.py` writes it), spacing its requests inside
+Binance's limits; run again, it asks only for what is missing.
+
+`marketlab xsection --data binance-data` then looks, cheaply, at four cross-sectional
+signals: momentum over 7 and 30 days, the last day's reversal, and funding carry (minus the
+mean rate of the last 7 days). Each day the universe is the 50 perpetuals with the most
+quote volume over 30 days; the portfolio is long those strictly above the signal's 80th
+percentile and short those strictly below its 20th (coins tied on a signal, as funding
+rates often are, are not ranked by name), half the capital a side, rebalanced every 1 or 7
+days, a round trip of 9 bp on every unit traded, the funding paid or received in the P&L.
+It reports each signal's daily rank IC and the portfolio's gross, costs and net a year,
+Sharpe from months and drawdown. It is not a hypothesis: nothing in it is written before it
+runs, and it reads nothing after 2023-12-31, so that 2024 .. 2026 stay held out for the
+hypothesis written about whatever it finds. The coins are those Binance still lists;
+coins gone from its list are missing, which flatters a rule that buys losers.
+`tests/test_xsection.py` works the universe, the portfolio, its costs and its funding out
+by hand, finds a planted momentum and nothing where there is none, and shows the held-out
+years are neither asked for nor read; `tests/test_fetch.py` runs the download against a
+local server.
 
 ## Tests
 

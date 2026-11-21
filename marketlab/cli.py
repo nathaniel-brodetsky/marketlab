@@ -368,6 +368,50 @@ def cmd_carry_report(a: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_xsection(a: argparse.Namespace) -> int:
+    from . import xsection as xs
+
+    try:
+        p, results = xs.report(a.data, a.first, a.until, a.top, a.q, a.cost, tuple(a.holds))
+    except xs.HeldOut as e:
+        raise ContractError(str(e)) from None
+    if not p.symbols:
+        raise ContractError(f"no daily bars under {a.data}/um/klines1d: scripts/fetch_universe.py")
+    print(
+        f"{len(p.symbols)} perpetuals under {a.data}, {a.first} .. {a.until}; each day the "
+        f"{a.top} with the most quote volume over 30 days; long the top {a.q:.0%} by the "
+        f"signal, short the bottom {a.q:.0%}; a round trip {a.cost:g} bp; funding in the P&L"
+    )
+    rows = [
+        {
+            "signal": r.signal,
+            "hold_days": r.hold,
+            "ic": round(r.ic, 4),
+            "ic_t": round(r.ic_t, 2),
+            "gross_pct": round(r.gross_pct, 2),
+            "cost_pct": round(r.cost_pct, 2),
+            "net_pct": round(r.net_pct, 2),
+            "sharpe_months": round(r.sharpe_months, 2),
+            "max_dd_pct": round(r.max_drawdown_pct, 2),
+            "pos_months": round(r.positive_months, 2),
+            "turnover": round(r.turnover, 2),
+            "names_side": round(r.names, 1),
+        }
+        for r in results
+    ]
+    with _wide():
+        print(pl.DataFrame(rows).sort("net_pct", descending=True))
+    print(
+        "ic: mean daily rank IC of the signal against the next hold_days' return of a long "
+        "(funding included), ic_t its t (Newey-West); gross/cost/net_pct: % a year of the "
+        "capital, half long, half short; turnover: weight traded at a rebalance; names_side: "
+        "positions a side. A rough look on the development years, not a hypothesis: nothing "
+        f"after {xs.DEV_END} is read. The perpetuals are those Binance lists now: coins gone "
+        "from its list are missing"
+    )
+    return 0
+
+
 def cmd_costwall(a: argparse.Namespace) -> int:
     from . import costwall as cw
 
@@ -1086,6 +1130,18 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
     g.add_argument("--out", help="per-day table to this .csv or .parquet file")
     g.set_defaults(run=cmd_strategy)
+
+    xs_ = sub.add_parser(
+        "xsection", help="cross-sectional signals on the perpetuals, development years only"
+    )
+    xs_.add_argument("--data", default="binance-data", help="default ./binance-data")
+    xs_.add_argument("--first", default="2020-01-01")
+    xs_.add_argument("--until", default="2023-12-31", help="no later than 2023-12-31")
+    xs_.add_argument("--top", type=int, default=50, help="the universe each day (default 50)")
+    xs_.add_argument("--q", type=float, default=0.2, help="share long and short (default 0.2)")
+    xs_.add_argument("--cost", type=float, default=9.0, help="a round trip, bp (default 9)")
+    xs_.add_argument("--holds", type=int, nargs="+", default=[1, 7], help="days between rebalances")
+    xs_.set_defaults(run=cmd_xsection)
 
     w = sub.add_parser(
         "costwall", help="how strong a signal must be to pay a round trip, horizon by horizon"

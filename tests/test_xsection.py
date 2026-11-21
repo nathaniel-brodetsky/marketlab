@@ -1,0 +1,119 @@
+"""The cross-sectional look: the universe, the portfolio, its costs and its funding worked
+out by hand; a planted momentum found and none where there is none; the held-out years
+refused and never read."""
+
+import datetime as dt
+
+import numpy as np
+import pytest
+
+from marketlab import xsection as xs
+from marketlab.cli import main
+
+DAY_MS = 86_400_000
+
+
+def ms(date: str) -> int:
+    return int(dt.datetime.fromisoformat(date).replace(tzinfo=dt.UTC).timestamp()) * 1000
+
+
+def write(root, sym, first, close, qvol, funding=None):
+    """Daily bars from `first`, and settlements every 8 h with the day's rate a third each."""
+    k = root / "um" / "klines1d" / f"{sym}.csv"
+    k.parent.mkdir(parents=True, exist_ok=True)
+    t0 = ms(first)
+    lines = ["open_time,open,high,low,close,volume,quote_volume,trades"]
+    lines += [
+        f"{t0 + i * DAY_MS},{c},{c},{c},{c},1.0,{v},10"
+        for i, (c, v) in enumerate(zip(close, qvol, strict=True))
+    ]
+    k.write_text("\n".join(lines) + "\n")
+    if funding is not None:
+        f = root / "um" / "fundingRate" / sym / f"{sym}-fundingRate.csv"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        rows = ["funding_time,funding_rate,mark_price"]
+        for i, rate in enumerate(funding):
+            rows += [f"{t0 + i * DAY_MS + h * 3_600_000},{rate / 3:.10f}," for h in (0, 8, 16)]
+        f.write_text("\n".join(rows) + "\n")
+
+
+def planted(root, drift: float, seed: int, n_sym=40, days=700):
+    """Each coin drifts at a rate that persists for 60 days, plus noise: momentum pays."""
+    rng = np.random.default_rng(seed)
+    for j in range(n_sym):
+        mu = np.repeat(rng.normal(0, drift, days // 60 + 1), 60)[:days]
+        lr = mu + rng.normal(0, 0.03, days)
+        close = 10 * np.exp(np.cumsum(lr))
+        write(root, f"C{j:02d}USDT", "2021-01-01", close, rng.uniform(1e6, 2e6, days),
+              rng.normal(1e-4, 5e-5, days))  # fmt: skip
+
+
+def test_the_portfolio_by_hand(tmp_path):
+    # 10 coins over 45 days; coin j's volume is j, so the top 5 are coins 5 .. 9
+    days = 45
+    for j in range(10):
+        close = 100 * (1 + 0.01 * j) ** np.arange(days)  # coin j gains j % a day
+        write(tmp_path, f"C{j}USDT", "2022-01-01", close, np.full(days, float(j + 1)),
+              np.full(days, 3e-4 * j))  # fmt: skip
+    p = xs.load(tmp_path, "2022-02-01", "2022-02-14")
+    assert p.dates[-1] == "2022-02-14" and p.dates[0] == "2021-12-23"
+    inu = xs.universe(p, top=5)
+    i = p.dates.index("2022-02-01")
+    assert sorted(np.flatnonzero(inu[i])) == [5, 6, 7, 8, 9]
+    assert not inu[p.dates.index("2022-01-15")].any()  # less than 30 days of bars
+    r = xs.daily_returns(p)
+    assert r[i, 7] == pytest.approx(0.07 - 3e-4 * 7)  # a long pays the funding
+    x = xs.signals(p)["mom7"]
+    pnl, turns, names = xs.portfolio(x, inu, r, i, 7, 0.2, 9.0)
+    # top 20% of 5 coins = 1 a side: long coin 9 (strongest), short coin 5
+    assert names == [1, 1] and turns[0] == pytest.approx(1.0) and turns[1] == pytest.approx(0.0)
+    assert pnl[i] == pytest.approx(-1.0 * 9 / 2 / 1e4)
+    assert pnl[i + 1] == pytest.approx(0.5 * r[i + 1, 9] - 0.5 * r[i + 1, 5])
+    carry = xs.signals(p)["carry"]
+    assert carry[i, 3] == pytest.approx(-3e-4 * 3)  # minus the mean daily rate over 7 days
+
+
+def test_a_planted_momentum_is_found_and_none_where_there_is_none(tmp_path):
+    planted(tmp_path / "trend", 0.01, seed=1)
+    planted(tmp_path / "none", 0.0, seed=2)
+    _, found = xs.report(tmp_path / "trend", "2021-03-01", "2022-11-30", top=30, cost_bp=9.0)
+    mom30 = next(r for r in found if r.signal == "mom30" and r.hold == 7)
+    assert mom30.ic > 0.1 and mom30.ic_t > 5 and mom30.net_pct > 20
+    assert mom30.cost_pct == pytest.approx(mom30.gross_pct - mom30.net_pct)
+    _, none = xs.report(tmp_path / "none", "2021-03-01", "2022-11-30", top=30, cost_bp=9.0)
+    for r in none:
+        assert abs(r.ic) < 0.03, r
+    rev = next(r for r in none if r.signal == "rev1")
+    assert rev.net_pct < 0 and rev.cost_pct > 5  # trading every day for nothing pays the costs
+
+
+def test_the_held_out_years_are_neither_asked_for_nor_read(tmp_path, capsys):
+    write(tmp_path, "AUSDT", "2023-12-01", np.arange(1.0, 61.0), np.ones(60))
+    with pytest.raises(xs.HeldOut):
+        xs.load(tmp_path, "2023-12-01", "2024-01-01")
+    p = xs.load(tmp_path, "2023-12-10", "2023-12-31")
+    assert p.dates[-1] == "2023-12-31" and np.isfinite(p.close[-1, 0])
+    assert len(p.dates) == 22 + 40  # 2024 bars in the file are not read
+    assert main(["xsection", "--data", str(tmp_path), "--until", "2024-06-30"]) == 2
+    assert "held out" in capsys.readouterr().err
+
+
+def test_the_command(tmp_path, capsys):
+    planted(tmp_path, 0.01, seed=3, n_sym=25, days=400)
+    assert main(["xsection", "--data", str(tmp_path), "--first", "2021-03-01",
+                 "--until", "2021-12-31", "--top", "20"]) == 0  # fmt: skip
+    out = capsys.readouterr().out
+    assert "25 perpetuals" in out and "mom30" in out and "carry" in out and "net_pct" in out
+    assert main(["xsection", "--data", str(tmp_path / "empty")]) == 2
+
+
+def test_coins_tied_on_the_signal_are_not_ranked_by_name():
+    x = np.array([[1.0, 1.0, 1.0, 1.0, 1.0, 2.0, 0.0, 1.0, 1.0, 1.0]])
+    x = np.vstack([x, x])
+    inu = np.ones_like(x, dtype=bool)
+    r = np.zeros_like(x)
+    _, turns, names = xs.portfolio(x, inu, r, 0, 1, 0.2, 9.0)
+    assert names == [1] and turns == [pytest.approx(1.0)]  # long coin 5, short coin 6 only
+    tied = np.ones_like(x)
+    _, turns, names = xs.portfolio(tied, inu, r, 0, 1, 0.2, 9.0)
+    assert names == [] and turns == [0.0]  # all tied: no position
