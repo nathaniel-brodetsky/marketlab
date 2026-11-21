@@ -320,7 +320,8 @@ to how far they may be. At a positive maker fee, the rule loses.
 `tests/test_strategy.py`: every order's fills are what the simulator gives it alone, at
 the price the rule gives from the best prices last seen, at them and away from them; the
 position never passes its limit and every decision knew it; the accounts add up; a day in
-pieces equals the whole day, also for orders resting long past their piece; a day cut
+pieces equals the whole day, also for orders resting long past their piece and for fills
+taken while a slow line carries the cancel; a day cut
 short changes no decision before the cut; the signal, the gate and both together keep
 orders out while against them and withdraw them at the first row against; the gate worked
 out by hand, high only above its limit, reading no trade after its time; a threshold no

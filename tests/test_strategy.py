@@ -208,6 +208,23 @@ def test_pieces_read_far_enough_for_orders_that_rest_long(tmp_path):
     assert part.fills.equals(whole.fills)
 
 
+def test_pieces_read_far_enough_for_fills_while_a_cancel_is_on_its_way(tmp_path):
+    # a slow line: an order decided near the end of its piece is still in the book for a
+    # latency after its life, so a piece read for `life` past its end misses its fills
+    s = synth.Scenario(seed=12, seconds=600.0, trade_rate=2.0)
+    path = synth.write(s, tmp_path)
+    q = st.Quoting(size=SIZE, life="10s", latency="5s", max_position=2)
+    whole = st.simulate_day(path, q, chunk=None)
+    part = st.simulate_day(path, q, chunk="5s")
+    step, life = 5 * SEC, 10 * SEC
+    past = whole.fills.join(whole.orders, on=["id", "side"]).filter(
+        pl.col("ts") > (pl.col("decided") // step + 1) * step + life
+    )
+    assert len(past) >= 2, "no fill later than its piece's end and a life: the test shows nothing"
+    assert part.orders.equals(whole.orders)
+    assert part.fills.equals(whole.fills)
+
+
 @RULES
 @pytest.mark.parametrize("cut_s", [150.3, 301.0, 452.7])
 def test_no_decision_depends_on_what_came_after_it(path, results, q, cut_s):
