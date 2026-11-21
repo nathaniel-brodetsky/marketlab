@@ -369,6 +369,8 @@ def cmd_carry_report(a: argparse.Namespace) -> int:
 
 
 def cmd_xsection(a: argparse.Namespace) -> int:
+    import polars.selectors as cs
+
     from . import xsection as xs
 
     try:
@@ -415,9 +417,36 @@ def cmd_xsection(a: argparse.Namespace) -> int:
         "(funding included), ic_t its t (Newey-West); gross/cost/net_pct: % a year of the "
         "capital, half long, half short; turnover: weight traded at a rebalance; names_side: "
         "positions a side. A rough look on the development years, not a hypothesis: nothing "
-        f"after {xs.DEV_END} is read. The perpetuals are those Binance lists now: coins gone "
-        "from its list are missing"
+        f"after {xs.DEV_END} is read. "
+        + (
+            "The perpetuals gone from Binance's list are in, from its archive (um/gone.csv)"
+            if (Path(a.data) / "um" / "gone.csv").exists()
+            else "The perpetuals are those Binance lists now: coins gone from its list are "
+            "missing (scripts/fetch_archive_universe.py fills them in)"
+        )
     )
+    for item in a.explain or []:
+        name, _, hold = item.partition(":")
+        if name not in xs.SIGNALS or not hold.isdigit() or int(hold) < 1:
+            raise ContractError(f"--explain {item}: SIGNAL:HOLD, a signal of {xs.SIGNALS}")
+        e = xs.explain(p, name, int(hold), a.top, a.q, a.cost, a.first)
+        g = e.legs
+        print(
+            f"\n{name}, rebalanced every {hold} days, % a year: long {g['long_price']:+.1f} "
+            f"price, {g['long_funding']:+.1f} funding; short {g['short_price']:+.1f} price, "
+            f"{g['short_funding']:+.1f} funding; costs {g['costs']:+.1f}"
+        )
+        with _wide():
+            print(pl.DataFrame(e.years).with_columns(cs.float().round(3)))
+            print(pl.DataFrame(e.quintiles).with_columns(cs.float().round(1)))
+            print(pl.DataFrame(e.coin_days).with_columns(cs.float().round(3)))
+        print(
+            f"fifths: the universe each day cut into fifths by the signal (5: highest), the "
+            f"next day's return of a long, mean and median, bp. The {len(e.coin_days)} coin-days "
+            f"with the largest contributions, % of the capital, best first, then the worst. "
+            f"The 10 best: {e.best_share:.0%} of the gross; the net without them "
+            f"{e.net_without_best:+.1f}% a year"
+        )
     return 0
 
 
@@ -1150,6 +1179,12 @@ def parser() -> argparse.ArgumentParser:
     xs_.add_argument("--q", type=float, default=0.2, help="share long and short (default 0.2)")
     xs_.add_argument("--cost", type=float, default=9.0, help="a round trip, bp (default 9)")
     xs_.add_argument("--holds", type=int, nargs="+", default=[1, 7], help="days between rebalances")
+    xs_.add_argument(
+        "--explain",
+        nargs="*",
+        metavar="SIGNAL:HOLD",
+        help="where the money came from, e.g. carry:1",
+    )
     xs_.set_defaults(run=cmd_xsection)
 
     w = sub.add_parser(

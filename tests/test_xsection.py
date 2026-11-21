@@ -104,7 +104,12 @@ def test_the_command(tmp_path, capsys):
                  "--until", "2021-12-31", "--top", "20"]) == 0  # fmt: skip
     out = capsys.readouterr().out
     assert "25 perpetuals" in out and "mom30" in out and "carry" in out and "net_pct" in out
-    assert "not coins: BTCDOMUSDT" in out and "no daily bar" not in out
+    assert "not coins: BLUEBIRDUSDT, BTCDOMUSDT" in out and "no daily bar" not in out
+    assert "coins gone from its list are missing" in out
+    (tmp_path / "um" / "gone.csv").write_text("symbol\n")
+    assert main(["xsection", "--data", str(tmp_path), "--first", "2021-03-01",
+                 "--until", "2021-12-31", "--top", "20"]) == 0  # fmt: skip
+    assert "are in, from its archive" in capsys.readouterr().out
     assert main(["xsection", "--data", str(tmp_path / "empty")]) == 2
 
 
@@ -144,3 +149,61 @@ def test_contracts_that_are_not_coins_are_left_out_and_days_without_bars_counted
     k.write_text("\n".join([lines[0], *lines[21:]]) + "\n")
     p = xs.load(tmp_path, "2022-02-10", "2022-03-01")
     assert p.symbols == ["AUSDT", "BUSDT"] and p.unbarred == {"BUSDT": 20}
+
+
+def test_where_the_money_came_from(tmp_path):
+    # 12 coins over 120 days, random walks with funding; coin 3 gains 400% on 2022-03-10
+    rng = np.random.default_rng(7)
+    days = 120
+    for j in range(12):
+        lr = rng.normal(0, 0.03, days)
+        if j == 3:  # the strongest for ten days, so held long, then up 400% on 2022-03-10
+            lr[58:68] += 0.05
+            lr[68] = np.log(5.0)
+        write(tmp_path, f"C{j:02d}USDT", "2022-01-01", 10 * np.exp(np.cumsum(lr)),
+              rng.uniform(1e6, 2e6, days), rng.normal(2e-4, 3e-4, days))  # fmt: skip
+    p = xs.load(tmp_path, "2022-02-15", "2022-04-30")
+    whole = xs.evaluate(p, "mom7", xs.signals(p)["mom7"], 1, 12, 0.2, 9.0, "2022-02-15")
+    e = xs.explain(p, "mom7", 1, top=12, q=0.2, cost_bp=9.0, first="2022-02-15")
+    assert sum(e.legs.values()) == pytest.approx(whole.net_pct)  # the legs add up to the net
+    assert e.legs["costs"] == pytest.approx(-whole.cost_pct)
+    assert [y["year"] for y in e.years] == ["2022"]
+    assert e.years[0]["net_pct"] == pytest.approx(whole.net_pct)
+    held, _, _, _ = xs.holdings(xs.signals(p)["mom7"], xs.universe(p, 12),
+                                p.dates.index("2022-02-15"), 1, 0.2)  # fmt: skip
+    i = p.dates.index("2022-03-10")
+    assert held[i, 3] == pytest.approx(0.5 / 3)  # 3 coins long, half the capital
+    top = e.coin_days[0]
+    assert (top["date"], top["symbol"]) == ("2022-03-10", "C03USDT")
+    assert top["price_pct"] == pytest.approx(400.0) and top["weight"] == pytest.approx(0.5 / 3)
+    assert top["contribution_pct"] == pytest.approx(100 / 6 * (4.0 - top["funding_pct"] / 100))
+    assert [d["contribution_pct"] for d in e.coin_days[:10]] == sorted(
+        [d["contribution_pct"] for d in e.coin_days[:10]], reverse=True)  # fmt: skip
+    # that day alone is 2/3 of the capital over 75 days: some 325% a year
+    assert whole.net_pct - e.net_without_best > 300
+    assert sum(qq["coin_days"] for qq in e.quintiles) > 0
+
+
+def test_the_fifths_show_a_planted_momentum(tmp_path):
+    planted(tmp_path, 0.01, seed=4, n_sym=30, days=400)
+    p = xs.load(tmp_path, "2021-03-01", "2021-12-31")
+    e = xs.explain(p, "mom30", 1, top=30, first="2021-03-01")
+    means = [qq["mean_bp"] for qq in e.quintiles]
+    assert means[4] > means[2] > means[0] and means[4] - means[0] > 50
+    assert e.quintiles[4]["median_bp"] > e.quintiles[0]["median_bp"]
+    planted(tmp_path / "none", 0.0, seed=6, n_sym=30, days=400)
+    flat = xs.explain(xs.load(tmp_path / "none", "2021-03-01", "2021-12-31"), "mom7", 1, top=30,
+                      first="2021-03-01")  # fmt: skip
+    means = [qq["mean_bp"] for qq in flat.quintiles]
+    assert abs(means[4] - means[0]) < 40  # the next day's, not the signal's own
+
+
+def test_the_command_explains(tmp_path, capsys):
+    planted(tmp_path, 0.01, seed=5, n_sym=20, days=300)
+    assert main(["xsection", "--data", str(tmp_path), "--first", "2021-03-01", "--until",
+                 "2021-10-31", "--top", "15", "--explain", "carry:1", "mom30:7"]) == 0  # fmt: skip
+    out = capsys.readouterr().out
+    assert "carry, rebalanced every 1 days" in out and "mom30, rebalanced every 7 days" in out
+    assert "median_bp" in out and "contribution_pct" in out and "the net without them" in out
+    assert main(["xsection", "--data", str(tmp_path), "--first", "2021-03-01", "--until",
+                 "2021-10-31", "--explain", "nothing:1"]) == 2  # fmt: skip

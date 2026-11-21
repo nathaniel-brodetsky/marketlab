@@ -34,7 +34,8 @@ ff = _load("fetch_funding")
 def server(monkeypatch):
     for k in ("no_proxy", "NO_PROXY"):
         monkeypatch.setenv(k, "*")
-    state = types.SimpleNamespace(files={}, calls=[], funding=[], klines={}, invalid=set())
+    state = types.SimpleNamespace(files={}, calls=[], funding=[], klines={}, invalid=set(),
+                                  bucket=set(), page=1000)  # fmt: skip
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self):
@@ -59,6 +60,8 @@ def server(monkeypatch):
                 lo, hi = int(q["startTime"]), int(q["endTime"])
                 rows = [r for r in state.klines.get(q["symbol"], []) if lo <= r[0] <= hi]
                 body = json.dumps(rows[: int(q["limit"])]).encode()
+            elif u.path == "/bucket":
+                body = _s3_listing(state, dict(urllib.parse.parse_qsl(u.query)))
             elif u.path in state.files:
                 body = state.files[u.path]
             else:
@@ -78,6 +81,30 @@ def server(monkeypatch):
     state.url = f"http://127.0.0.1:{srv.server_port}"
     yield state
     srv.shutdown()
+
+
+def _s3_listing(state, q: dict) -> bytes:
+    """A page of an S3 listing (version 1) of `state.bucket`, as the archive's bucket gives."""
+    prefix, delim, marker = q.get("prefix", ""), q.get("delimiter", ""), q.get("marker", "")
+    items: list[tuple[str, str]] = []
+    for k in sorted(state.bucket):
+        if not k.startswith(prefix):
+            continue
+        rest = k[len(prefix) :]
+        item = ("p", prefix + rest.split(delim)[0] + delim) if delim and delim in rest else ("k", k)
+        if item not in items:
+            items.append(item)
+    items = [it for it in items if it[1] > marker]
+    page, more = items[: state.page], len(items) > state.page
+    xml = ['<?xml version="1.0" encoding="UTF-8"?>',
+           '<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">',
+           f"<Prefix>{prefix}</Prefix><IsTruncated>{str(more).lower()}</IsTruncated>"]  # fmt: skip
+    if more and delim:
+        xml.append(f"<NextMarker>{page[-1][1]}</NextMarker>")
+    for kind, v in page:
+        xml.append(f"<CommonPrefixes><Prefix>{v}</Prefix></CommonPrefixes>" if kind == "p"
+                   else f"<Contents><Key>{v}</Key><Size>1</Size></Contents>")  # fmt: skip
+    return "".join([*xml, "</ListBucketResult>"]).encode()
 
 
 def _zip(name: str, text: str) -> bytes:
@@ -240,3 +267,108 @@ def test_the_universe_of_perpetuals(server, tmp_path, capsys):
     q = urllib.parse.parse_qs(urllib.parse.urlparse(asked[0]).query)
     assert len(asked) == 1 and int(q["startTime"][0]) == server.klines["AAAUSDT"][1599][0] + DAY_MS
     assert len((tmp_path / "um" / "klines1d" / "AAAUSDT.csv").read_text().splitlines()) == 1602
+
+
+fa = _load("fetch_archive_universe")
+
+
+def _archive(state, sym: str, kind: str, month: str, text: str) -> None:
+    """A monthly archive file, its checksum, and its key in the bucket's listing."""
+    sub, tag = (f"klines/{sym}/1d", "1d") if kind == "klines" else (f"fundingRate/{sym}", kind)
+    name = f"{sym}-{tag}-{month}.zip"
+    key = f"data/futures/um/monthly/{sub}/{name}"
+    _publish(state, "/" + key, _zip(name, text))
+    state.bucket |= {key, key + ".CHECKSUM"}
+
+
+def _month_bars(month: str, close: float, header: bool = False) -> str:
+    first = dt.datetime.fromisoformat(f"{month}-01").replace(tzinfo=dt.UTC)
+    t0 = int(first.timestamp() * 1000)
+    n = ((first.replace(day=28) + dt.timedelta(days=4)).replace(day=1) - first).days
+    rows = [",".join(fu.KLINE_COLUMNS)] if header else []
+    rows += [f"{t0 + k * DAY_MS},1,1,1,{close},10,{t0 + (k + 1) * DAY_MS - 1},{500 + k}.5,9,5,5,0"
+             for k in range(n)]  # fmt: skip
+    return "\n".join(rows) + "\n"
+
+
+def test_the_archive_fills_in_the_perpetuals_gone_and_the_bars_not_served(server, tmp_path,
+                                                                          capsys):  # fmt: skip
+    # listed: AAAUSDT, its funding from 2021-01-01 but its bars from the API only from June
+    fu.write_rows(tmp_path / "um" / "universe.csv", fu.UNIVERSE_COLUMNS,
+                  [["AAAUSDT", "TRADING", 0, "AAA", "USDT"],
+                   ["BBBUSDT", "TRADING", 0, "BBB", "USDT"]])  # fmt: skip
+    api = _bars("2021-06-01", 61)
+    fu.write_rows(tmp_path / "um" / "klines1d" / "AAAUSDT.csv", fu.KLINE_COLUMNS,
+                  [[str(r[0]), *r[1:6], r[7], str(r[8])] for r in api])  # fmt: skip
+    fu.write_rows(
+        tmp_path / "um" / "klines1d" / "BBBUSDT.csv",
+        fu.KLINE_COLUMNS,
+        [[str(r[0]), *r[1:6], r[7], str(r[8])] for r in _bars("2021-01-01", 200)],
+    )
+    t0 = int(dt.datetime(2021, 1, 1, tzinfo=dt.UTC).timestamp() * 1000)
+    ff.write(tmp_path / "um" / "fundingRate" / "AAAUSDT" / "AAAUSDT-fundingRate.csv",
+             [(t0 + k * DAY_MS, "0.0001", "") for k in range(212)])  # fmt: skip
+    ff.write(tmp_path / "um" / "fundingRate" / "BBBUSDT" / "BBBUSDT-fundingRate.csv",
+             [(t0 + k * DAY_MS, "0.0001", "") for k in range(200)])  # fmt: skip
+    for month in ("2021-01", "2021-02", "2021-03", "2021-04", "2021-05", "2021-06"):
+        _archive(server, "AAAUSDT", "klines", month, _month_bars(month, 7.0, header=True))
+    _archive(server, "BBBUSDT", "klines", "2021-01", _month_bars("2021-01", 3.0))
+    # gone: GONEUSDT (funding from the API), GTWOUSDT (funding from the archive only)
+    for month in ("2020-11", "2020-12", "2021-01"):
+        _archive(server, "GONEUSDT", "klines", month, _month_bars(month, 2.0))
+    _archive(server, "GTWOUSDT", "klines", "2021-02", _month_bars("2021-02", 4.0))
+    feb = int(dt.datetime(2021, 2, 1, tzinfo=dt.UTC).timestamp() * 1000)
+    _archive(
+        server,
+        "GTWOUSDT",
+        "fundingRate",
+        "2021-02",
+        "calc_time,funding_interval_hours,last_funding_rate\n"
+        + "".join(f"{feb + k * 8 * 3_600_000 + 5},8,-0.0002\n" for k in range(84)),
+    )
+    server.funding += [
+        {
+            "symbol": "GONEUSDT",
+            "fundingTime": t0 + k * 8 * 3_600_000,
+            "fundingRate": "0.0003",
+            "markPrice": "2",
+        }
+        for k in range(93)
+    ]
+    # not perpetuals in USDT: a delivery contract and a BUSD one
+    _archive(server, "AAAUSDT_210625", "klines", "2021-01", _month_bars("2021-01", 1.0))
+    _archive(server, "CCCBUSD", "klines", "2021-01", _month_bars("2021-01", 1.0))
+    server.page = 2  # the listing a page of two at a time
+    args = ["--start", "2021-01-01", "--end", "2021-07-31", "--out", str(tmp_path),
+            "--base-url", server.url, "--api-url", server.url, "--list-url",
+            server.url + "/bucket", "--funding-pause", "0"]  # fmt: skip
+    assert fa.main(args) == 0
+    out = capsys.readouterr().out
+    assert "4 USDT perpetuals in the archive: 2 gone from Binance's list, 1 listed" in out
+    a = fu.read_rows(tmp_path / "um" / "klines1d" / "AAAUSDT.csv", fu.KLINE_COLUMNS)
+    days = [int(r[0]) for r in a]
+    assert days == sorted(set(days)) and days[0] == t0 and len(a) == 151 + 61
+    june = int(dt.datetime(2021, 6, 1, tzinfo=dt.UTC).timestamp() * 1000)
+    by_day = {int(r[0]): r for r in a}
+    assert by_day[t0][4] == "7.0" and by_day[t0][6] == "500.5"  # from the archive
+    assert by_day[june][4] == "1.000"  # the API's bar kept, not the archive's
+    assert "+151 days of 151 without a bar" in out
+    g = fu.read_rows(tmp_path / "um" / "klines1d" / "GONEUSDT.csv", fu.KLINE_COLUMNS)
+    assert len(g) == 31 and int(g[0][0]) == t0  # November and December are before --start
+    gf = ff.read(tmp_path / "um" / "fundingRate" / "GONEUSDT" / "GONEUSDT-fundingRate.csv")
+    assert len(gf) == 93 and gf[0][1] == "0.0003"
+    tf = ff.read(tmp_path / "um" / "fundingRate" / "GTWOUSDT" / "GTWOUSDT-fundingRate.csv")
+    assert len(tf) == 84 and tf[0] == (feb + 5, "-0.0002", "")
+    gone = (tmp_path / "um" / "gone.csv").read_text().splitlines()
+    assert gone[0] == "symbol,first_day,last_day,days,settlements,funding_from"
+    assert gone[1:] == ["GONEUSDT,2021-01-01,2021-01-31,31,93,api",
+                        "GTWOUSDT,2021-02-01,2021-02-28,28,84,archive"]  # fmt: skip
+    assert not any("BBBUSDT" in c and c.endswith(".zip") for c in server.calls)
+    zips = [c for c in server.calls if c.endswith(".zip")]
+    assert fa.main(args) == 0  # again: nothing downloaded twice
+    assert [c for c in server.calls if c.endswith(".zip")] == zips
+    assert "0 listed with days of funding and no bar" in capsys.readouterr().out
+    assert (tmp_path / "um" / "gone.csv").read_text().splitlines()[1:] == gone[1:]
+    # a listing that is not one fails the run
+    assert fa.main([*args[:-3], server.url + "/nothing", "--funding-pause", "0"]) == 1
+    assert "the archive's list of perpetuals" in capsys.readouterr().err
