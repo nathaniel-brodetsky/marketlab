@@ -25,13 +25,16 @@ Each UTC day `d`, at its close:
 Reported: the daily rank IC of each signal against the next `hold` days' return (Newey-West
 over `hold` days), and the portfolio's gross, costs, net, Sharpe from months, drawdown.
 The universe is the perpetuals Binance still lists: coins delisted and gone from its list
-are missing, which flatters anything that buys losers.
+are missing, which flatters anything that buys losers. Five contracts are not a coin's own
+price and are left out (`NOT_COINS`). A perpetual that settled funding on a day with no
+daily bar (often an earlier listing whose bars Binance no longer serves) is missing from
+the universe on that day; `Panel.unbarred` counts those days.
 """
 
 from __future__ import annotations
 
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -42,6 +45,11 @@ from .validation import metrics
 
 DEV_END = "2023-12-31"
 SIGNALS = ("mom7", "mom30", "rev1", "carry")
+# A stablecoin, two indices and two gold tokens (the gold ones listed after the development
+# years): none of them a coin's own price.
+NOT_COINS = frozenset({"USDCUSDT", "BTCDOMUSDT", "DEFIUSDT", "PAXGUSDT", "XAUTUSDT"})
+KLINE_TYPES = {"open_time": pl.Int64, "close": pl.Float64, "quote_volume": pl.Float64}
+FUNDING_TYPES = {"funding_time": pl.Int64, "funding_rate": pl.Float64}
 
 
 class HeldOut(ValueError):
@@ -55,6 +63,14 @@ class Panel:
     close: np.ndarray  # days x symbols, NaN without a bar
     qvol: np.ndarray  # quote volume, NaN without a bar
     funding: np.ndarray  # sum of the rates settled that day; NaN without a funding history
+    unbarred: dict[str, int] = field(default_factory=dict)  # days with funding, no bar
+
+
+def read_columns(path: Path, types: dict[str, pl.DataType]) -> pl.DataFrame:
+    """The columns named, with their types: read as text and then cast, so that a column
+    whose first rows look whole (a volume of 100, then 1.5) cannot fail the read."""
+    raw = pl.read_csv(path, infer_schema=False, columns=list(types))
+    return raw.select(pl.col(c).cast(t) for c, t in types.items())
 
 
 def _day(ms: np.ndarray) -> np.ndarray:
@@ -70,28 +86,33 @@ def load(root: str | Path, first: str, last: str) -> Panel:
     d1 = (dt.date.fromisoformat(last) - dt.date(1970, 1, 1)).days
     days = np.arange(d0, d1 + 1)
     folder = Path(root) / "um" / "klines1d"
-    files = sorted(folder.glob("*.csv"))
+    files = sorted(f for f in folder.glob("*.csv") if f.stem not in NOT_COINS)
     symbols = [f.stem for f in files]
     close = np.full((len(days), len(files)), np.nan)
     qvol = np.full_like(close, np.nan)
     funding = np.full_like(close, np.nan)
+    unbarred: dict[str, int] = {}
     for j, f in enumerate(files):
-        k = pl.read_csv(f, schema_overrides={"open_time": pl.Int64})
+        k = read_columns(f, KLINE_TYPES)
         d = _day(k["open_time"].to_numpy())
         ok = (d >= d0) & (d <= d1)
-        close[d[ok] - d0, j] = k["close"].to_numpy().astype(float)[ok]
-        qvol[d[ok] - d0, j] = k["quote_volume"].to_numpy().astype(float)[ok]
+        close[d[ok] - d0, j] = k["close"].to_numpy()[ok]
+        qvol[d[ok] - d0, j] = k["quote_volume"].to_numpy()[ok]
         fr = Path(root) / "um" / "fundingRate" / f.stem / f"{f.stem}-fundingRate.csv"
         if fr.exists():
-            r = pl.read_csv(fr, schema_overrides={"funding_time": pl.Int64,
-                                                  "funding_rate": pl.Float64})  # fmt: skip
+            r = read_columns(fr, FUNDING_TYPES)
             fd = _day(r["funding_time"].to_numpy())
             keep = (fd >= d0) & (fd <= d1)
             col = np.zeros(len(days))
             np.add.at(col, fd[keep] - d0, r["funding_rate"].to_numpy()[keep])
             funding[:, j] = col
+            settled = np.zeros(len(days), dtype=bool)
+            settled[fd[keep] - d0] = True
+            n = int((settled & ~np.isfinite(close[:, j])).sum())
+            if n:
+                unbarred[f.stem] = n
     dates = [(dt.date(1970, 1, 1) + dt.timedelta(days=int(x))).isoformat() for x in days]
-    return Panel(dates, symbols, close, qvol, funding)
+    return Panel(dates, symbols, close, qvol, funding, unbarred)
 
 
 def _lag(a: np.ndarray, k: int) -> np.ndarray:

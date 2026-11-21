@@ -380,8 +380,17 @@ def cmd_xsection(a: argparse.Namespace) -> int:
     print(
         f"{len(p.symbols)} perpetuals under {a.data}, {a.first} .. {a.until}; each day the "
         f"{a.top} with the most quote volume over 30 days; long the top {a.q:.0%} by the "
-        f"signal, short the bottom {a.q:.0%}; a round trip {a.cost:g} bp; funding in the P&L"
+        f"signal, short the bottom {a.q:.0%}; a round trip {a.cost:g} bp; funding in the P&L; "
+        f"left out, not coins: {', '.join(sorted(xs.NOT_COINS))}"
     )
+    if p.unbarred:
+        most = sorted(p.unbarred.items(), key=lambda kv: (-kv[1], kv[0]))
+        print(
+            f"{len(most)} perpetuals settled funding on {sum(p.unbarred.values())} days with no "
+            f"daily bar: Binance serves no bars for those days (an earlier listing of a coin "
+            f"listed again, for one), so they are missing from the universe; most: "
+            + ", ".join(f"{s} {n}" for s, n in most[:8])
+        )
     rows = [
         {
             "signal": r.signal,

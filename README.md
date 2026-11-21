@@ -443,7 +443,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 152 in all, each caught.
+it is compared with and a taker filled with no latency: 156 in all, each caught.
 
 ## Numbers
 
@@ -665,7 +665,13 @@ It reports each signal's daily rank IC and the portfolio's gross, costs and net 
 Sharpe from months and drawdown. It is not a hypothesis: nothing in it is written before it
 runs, and it reads nothing after 2023-12-31, so that 2024 .. 2026 stay held out for the
 hypothesis written about whatever it finds. The coins are those Binance still lists;
-coins gone from its list are missing, which flatters a rule that buys losers.
+coins gone from its list are missing, which flatters a rule that buys losers. Five
+contracts that are not a coin's own price are left out: USDC, the BTC-dominance and DeFi
+indices, and two gold tokens. A perpetual that settled funding on a day for which Binance
+serves no daily bar (an earlier listing of a coin listed again, for one) is missing from
+the universe on that day; the command says how many such days there are, and for which
+coins. Every file is read as text and then cast, since a column whose first rows look
+whole (a volume of 100, then 1.5) would otherwise fail the read.
 `tests/test_xsection.py` works the universe, the portfolio, its costs and its funding out
 by hand, finds a planted momentum and nothing where there is none, and shows the held-out
 years are neither asked for nor read; `tests/test_fetch.py` runs the download against a

@@ -812,6 +812,30 @@ M = [
     ),
     (
         "marketlab/xsection.py",
+        "    raw = pl.read_csv(path, infer_schema=False, columns=list(types))",
+        "    raw = pl.read_csv(path, columns=list(types))",
+        "the cross-section guesses a column's type from its first rows",
+    ),
+    (
+        "marketlab/carry.py",
+        "            io.BytesIO(data), has_header=header, new_columns=KLINE_COLUMNS, infer_schema=False",
+        "            io.BytesIO(data), has_header=header, new_columns=KLINE_COLUMNS",
+        "the carry guesses a kline column's type from its first rows",
+    ),
+    (
+        "marketlab/xsection.py",
+        '    files = sorted(f for f in folder.glob("*.csv") if f.stem not in NOT_COINS)',
+        '    files = sorted(folder.glob("*.csv"))',
+        "a stablecoin and the indices ranked with the coins",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            n = int((settled & ~np.isfinite(close[:, j])).sum())",
+        "            n = int((settled & np.isfinite(close[:, j])).sum())",
+        "days without bars counted as the days with them",
+    ),
+    (
+        "marketlab/xsection.py",
         "    return r - np.nan_to_num(p.funding)",
         "    return r + np.nan_to_num(p.funding)",
         "a long paid the funding it pays",

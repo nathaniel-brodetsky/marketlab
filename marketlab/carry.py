@@ -172,7 +172,9 @@ def read_klines(root: str | Path, market: str, symbol: str, interval: str) -> pl
                 raise ex.ExperimentError(f"{f}: expected one CSV inside, found {names}")
             data = z.read(names[0])
         header = bool(data) and not data[:1].isdigit()
-        df = pl.read_csv(io.BytesIO(data), has_header=header, new_columns=KLINE_COLUMNS)
+        df = pl.read_csv(
+            io.BytesIO(data), has_header=header, new_columns=KLINE_COLUMNS, infer_schema=False
+        )  # text, then cast: whole volumes, then a fraction
         parts.append(
             df.select(
                 pl.col("open_time").cast(pl.Int64),

@@ -109,6 +109,12 @@ def test_the_archives_are_read_in_any_unit(tmp_path):
     assert f["rate"].to_list() == [1e-4, -2e-4] and np.isnan(f["mark"][0])
     with pytest.raises(ex.ExperimentError, match="fetch_funding"):
         carry.read_funding(tmp_path / "nothing", "BTCUSDT")
+    # prices that look whole for their first 150 rows, then a fraction
+    t2 = np.arange(ms("2023-03-01"), ms("2023-03-01") + 200 * H, H)
+    whole = np.array([100] * 150 + [100.5] * 50, dtype=object)
+    write_klines(tmp_path / "whole", "um", t2, whole, whole)
+    w = carry.read_klines(tmp_path / "whole", "um", "BTCUSDT", "1h")
+    assert w["close"].to_list()[148:152] == [100.0, 100.0, 100.5, 100.5]
 
 
 def test_the_money_by_hand():

@@ -104,6 +104,7 @@ def test_the_command(tmp_path, capsys):
                  "--until", "2021-12-31", "--top", "20"]) == 0  # fmt: skip
     out = capsys.readouterr().out
     assert "25 perpetuals" in out and "mom30" in out and "carry" in out and "net_pct" in out
+    assert "not coins: BTCDOMUSDT" in out and "no daily bar" not in out
     assert main(["xsection", "--data", str(tmp_path / "empty")]) == 2
 
 
@@ -117,3 +118,29 @@ def test_coins_tied_on_the_signal_are_not_ranked_by_name():
     tied = np.ones_like(x)
     _, turns, names = xs.portfolio(tied, inu, r, 0, 1, 0.2, 9.0)
     assert names == [] and turns == [0.0]  # all tied: no position
+
+
+def test_columns_whose_first_rows_look_whole_are_read(tmp_path):
+    # polars guesses a column's type from its first rows: whole volumes, then a fraction
+    k = tmp_path / "um" / "klines1d" / "AUSDT.csv"
+    k.parent.mkdir(parents=True)
+    t0 = ms("2021-01-01")
+    lines = ["open_time,open,high,low,close,volume,quote_volume,trades"]
+    lines += [f"{t0 + i * DAY_MS},1,1,1,{1 + i},{100 if i < 150 else 1.5},"
+              f"{200 if i < 150 else 2.5},10" for i in range(200)]  # fmt: skip
+    k.write_text("\n".join(lines) + "\n")
+    p = xs.load(tmp_path, "2021-03-01", "2021-07-19")
+    assert p.qvol[p.dates.index("2021-05-30"), 0] == 200.0
+    assert p.qvol[p.dates.index("2021-05-31"), 0] == 2.5 and p.close[-1, 0] == 200.0
+
+
+def test_contracts_that_are_not_coins_are_left_out_and_days_without_bars_counted(tmp_path):
+    write(tmp_path, "AUSDT", "2022-01-01", np.ones(60), np.ones(60), np.zeros(60))
+    write(tmp_path, "USDCUSDT", "2022-01-01", np.ones(60), np.full(60, 1e9), np.zeros(60))
+    # funding settled from 2022-01-01, bars only from 2022-01-21
+    write(tmp_path, "BUSDT", "2022-01-01", np.ones(60), np.ones(60), np.zeros(60))
+    k = tmp_path / "um" / "klines1d" / "BUSDT.csv"
+    lines = k.read_text().splitlines()
+    k.write_text("\n".join([lines[0], *lines[21:]]) + "\n")
+    p = xs.load(tmp_path, "2022-02-10", "2022-03-01")
+    assert p.symbols == ["AUSDT", "BUSDT"] and p.unbarred == {"BUSDT": 20}
