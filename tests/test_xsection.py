@@ -126,6 +126,45 @@ def test_coins_tied_on_the_signal_are_not_ranked_by_name():
     assert names == [] and turns == [0.0]  # all tied: no position
 
 
+def test_a_day_ranks_the_same_wherever_the_data_begin_and_rates_tie_in_any_order(tmp_path):
+    # most coins on Binance's default rate most days, as in the market: ties at the cut
+    rng = np.random.default_rng(0)
+    days = 200
+    for j in range(30):
+        f = np.where(rng.random(days) < 0.8, 3e-4, np.round(rng.normal(3e-4, 4e-4, days), 8))
+        close = 10 * np.exp(np.cumsum(rng.normal(0, 0.03, days)))
+        write(tmp_path, f"C{j:02d}USDT", "2023-06-01", close, rng.uniform(1e6, 2e6, days), f)
+    # pairs of coins whose last week holds the same rates, one in the other's reverse order
+    # (ordinary rates, and a squeeze's), and one a day's rate off by the smallest step
+    week = np.array([1e-4, 3e-4, 1.2e-3, 6.25e-5, -4e-4, 4.5e-4, 6.25e-5])
+    squeeze = np.array([-0.0464, -0.173, 0.6646, 0.0452, -0.0705, -0.0563, -0.1336])
+    step = week + np.array([1e-8, 0, 0, 0, 0, 0, 0])
+    for sym, w in (("AAAUSDT", week), ("BBBUSDT", week[::-1]), ("DDDUSDT", squeeze),
+                   ("EEEUSDT", squeeze[::-1]), ("CCCUSDT", step)):  # fmt: skip
+        f = np.full(days, 3e-4)
+        f[-7:] = w
+        write(tmp_path, sym, "2023-06-01", np.full(days, 10.0), np.full(days, 3e6), f)
+    last = "2023-12-17"  # the 200th day
+    a = xs.load(tmp_path, "2023-07-15", last)
+    b = xs.load(tmp_path, "2023-09-01", last)
+    ia, ib = a.dates.index("2023-09-01"), b.dates.index("2023-09-01")
+    sa, sb = xs.signals(a)["carry"], xs.signals(b)["carry"]
+    assert np.array_equal(sa[ia:], sb[ib:], equal_nan=True)
+    ua, ub = xs.universe(a, 20), xs.universe(b, 20)
+    assert np.array_equal(ua[ia:], ub[ib:])
+    ha = xs.holdings(sa, ua, ia, 7, 0.2, True)[0]
+    hb = xs.holdings(sb, ub, ib, 7, 0.2, True)[0]
+    assert np.array_equal(ha[ia:], hb[ib:])
+    assert (ha[ia:] != 0).any()
+    c = {s: sb[-1, b.symbols.index(s)] for s in ("AAAUSDT", "BBBUSDT", "CCCUSDT", "DDDUSDT",
+                                                  "EEEUSDT")}  # fmt: skip
+    # tied, so that neither is ranked above the other by rounding; a step apart, not tied
+    assert c["AAAUSDT"] == c["BBBUSDT"] and c["DDDUSDT"] == c["EEEUSDT"]
+    assert c["CCCUSDT"] < c["AAAUSDT"]
+    assert np.isnan(xs._trailing_mean(np.array([[1.0], [np.nan], [1.0]]), 2)).all()
+    assert xs._trailing_mean(np.array([[1.0], [3.0]]), 2)[-1, 0] == 2.0  # as long as the window
+
+
 def test_columns_whose_first_rows_look_whole_are_read(tmp_path):
     # polars guesses a column's type from its first rows: whole volumes, then a fraction
     k = tmp_path / "um" / "klines1d" / "AUSDT.csv"

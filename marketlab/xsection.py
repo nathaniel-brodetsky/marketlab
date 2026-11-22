@@ -288,14 +288,19 @@ def _lag(a: np.ndarray, k: int) -> np.ndarray:
 
 
 def _trailing_mean(a: np.ndarray, k: int) -> np.ndarray:
-    """The mean of the last `k` rows, this one included; NaN unless all are there."""
-    c = np.concatenate([np.zeros((1, a.shape[1])), np.cumsum(np.nan_to_num(a), axis=0)])
-    n = np.concatenate([np.zeros((1, a.shape[1])), np.cumsum(np.isfinite(a), axis=0)])
-    out = np.full_like(a, np.nan)
-    out[k - 1 :] = (c[k:] - c[:-k]) / k
-    full = np.full_like(a, False, dtype=bool)
-    full[k - 1 :] = (n[k:] - n[:-k]) == k
-    return np.where(full, out, np.nan)
+    """The mean of the last `k` rows, this one included; NaN unless all are there (a NaN
+    in the window carries through the sum). Each window is summed on its own, in order: a
+    day's mean is the same to the last bit wherever the data begin. (A running sum's
+    difference was not: its rounding carried what came before, and coins tied on a rate
+    were ranked by it.)"""
+    out = np.full(a.shape, np.nan)
+    if len(a) >= k:
+        last = len(a) - k + 1
+        s = a[:last].astype(float)
+        for t in range(1, k):
+            s = s + a[t : t + last]
+        out[k - 1 :] = s / k
+    return out
 
 
 def signals(p: Panel) -> dict[str, np.ndarray]:
@@ -304,7 +309,9 @@ def signals(p: Panel) -> dict[str, np.ndarray]:
         "mom7": lc - _lag(lc, 7),
         "mom30": lc - _lag(lc, 30),
         "rev1": -(lc - _lag(lc, 1)),
-        "carry": -_trailing_mean(p.funding, 7),
+        # rounded where no two rates differ (they are given to 1e-8): coins whose windows
+        # hold the same rates in another order tie, as they should, not by rounding
+        "carry": -np.round(_trailing_mean(p.funding, 7), 12),
     }
 
 
