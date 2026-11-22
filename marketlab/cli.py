@@ -477,6 +477,9 @@ def cmd_xsection(a: argparse.Namespace) -> int:
             "missing (scripts/fetch_archive_universe.py fills them in)"
         )
     )
+    if a.list_coins:
+        Path(a.list_coins).write_text("\n".join(p.symbols) + "\n")
+        print(f"{len(p.symbols)} perpetuals on coins -> {a.list_coins}")
     if a.list_universe:
         inu = xs.universe(p, a.top)
         ever = [sym for j, sym in enumerate(p.symbols) if inu[:, j].any()]
@@ -1310,6 +1313,8 @@ def parser() -> argparse.ArgumentParser:
                      default=["mom7:1", "carry:7", "carry:1"])  # fmt: skip
     xs_.add_argument("--list-universe", metavar="FILE",
                      help="write every perpetual ever in the universe, one a line")  # fmt: skip
+    xs_.add_argument("--list-coins", metavar="FILE",
+                     help="write every perpetual on a coin under --data, one a line")  # fmt: skip
     xs_.set_defaults(run=cmd_xsection)
 
     w = sub.add_parser(

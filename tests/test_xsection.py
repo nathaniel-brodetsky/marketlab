@@ -357,20 +357,20 @@ def test_traded_hours_after_the_close_by_hand(tmp_path):
         xs.lagged(held, tmp_path, [0])
 
 
-def zigzag(root, days=120):
+def zigzag(root, days=120, first="2021-01-01", coins=None):
     """Twelve coins whose daily close swings up and down by a_j, the hour bars making the
     day's whole move in its first two hours: traded at the close, a reversal gets it all;
     four hours later, it is already gone and the next day's move is the wrong way."""
-    day0 = ms("2021-01-01") // 86_400_000
-    for j in range(12):
+    day0 = ms(first) // 86_400_000
+    for j in range(12) if coins is None else coins:
         a = 0.01 * (j + 1)
 
         def level(b, a=a):
             return 10 * np.exp(a * (-1.0) ** b)
 
         close = [level(day0 + i + 1) for i in range(days)]
-        write(root, f"C{j:02d}USDT", "2021-01-01", close, np.full(days, 1e6 + j))
-        hourly(root, f"C{j:02d}USDT", "2021-01-01", days + 1,
+        write(root, f"C{j:02d}USDT", first, close, np.full(days, 1e6 + j))
+        hourly(root, f"C{j:02d}USDT", first, days + 1,
                lambda h, level=level: level(h // 24 + (1 if h % 24 >= 2 else 0)))  # fmt: skip
 
 

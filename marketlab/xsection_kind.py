@@ -45,10 +45,13 @@ class Rule:
     hold: int  # days between rebalances
     top: int  # the universe's size
     q: float  # the share of the universe a side
+    hours: int = 0  # traded this long after the daily close, from hourly bars
 
     @property
     def name(self) -> str:
-        return f"{self.signal}, every {self.hold} days, top {self.top}, {self.q:.0%} a side"
+        late = f", traded {self.hours} h after the close" if self.hours else ""
+        return (f"{self.signal}, every {self.hold} days, top {self.top}, {self.q:.0%} a side"
+                + late)  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -112,12 +115,14 @@ def load_spec(path: str | Path) -> Spec:
                 return default
             return ex._get(d, key, "rule")
 
-        r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)))
+        r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
+                 int(get("hours", 0)))  # fmt: skip
         if r.signal not in xs.SIGNALS:
             raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of {xs.SIGNALS}")
-        if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5:
+        if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
             raise ex.ExperimentError(
-                f"{path}: {r.name}: hold at least 1 day, top at least 10, q between 0 and 0.5"
+                f"{path}: {r.name}: hold at least 1 day, top at least 10, q between 0 and 0.5, "
+                f"hours from 0 to 23"
             )
         return r
 
@@ -164,21 +169,38 @@ class Days:
     gross: np.ndarray
     market: np.ndarray
     names: float  # positions a side, on average
+    priced: float  # the share of the positions with a return: a bar at both ends of the day
 
 
-def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict) -> Days:
-    """The rule from `first` to the panel's last day; `cache` keeps what rules share."""
+#: the least share of the held-out universe's coin-days with an hour bar at both ends for
+#: a rule traded hours after the close; below it, nothing is computed
+MIN_PRICED = 0.98
+
+
+def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
+           root: str | Path | None = None, held_out: bool = False) -> Days:  # fmt: skip
+    """The rule from `first` to the panel's last day; `cache` keeps what rules share. A rule
+    traded hours after the close reads the hour bars under `root`."""
     if rule.top not in cache:
         cache[rule.top] = xs.universe(p, rule.top)
-    if "r" not in cache:
-        cache["r"], cache["x"] = xs.daily_returns(p), xs.signals(p)
-    inu, r, x = cache[rule.top], cache["r"], cache["x"][rule.signal]
+    if "x" not in cache:
+        cache["x"] = xs.signals(p)
+    key = ("r", rule.hours)
+    if key not in cache:
+        if rule.hours == 0:
+            cache[key] = xs.daily_returns(p)
+        else:
+            cache[key] = xs.lagged(p, root, [rule.hours], held_out)[rule.hours].r
+    inu, r, x = cache[rule.top], cache[key], cache["x"][rule.signal]
     start = p.dates.index(first)
     pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp)
     gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0)
+    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q)
+    on = held[start:] != 0
     mkt = xs.market(inu, r, start)
     return Days(p.dates[start:], pnl[start:], gross[start:], mkt[start:],
-                float(np.mean(names)) if names else float("nan"))  # fmt: skip
+                float(np.mean(names)) if names else float("nan"),
+                float(np.isfinite(r[start:])[on].mean()) if on.any() else float("nan"))  # fmt: skip
 
 
 def score(d: Days, lags: int) -> dict:
@@ -206,6 +228,7 @@ def score(d: Days, lags: int) -> dict:
         "positive_months": ex._f((months > 0).mean()) if len(months) else None,
         "beta": ex._f(xs.slope(d.gross[1:], d.market[1:])),
         "names_side": ex._f(d.names),
+        "priced": ex._f(d.priced),
         "by_year_pct": years,
     }
 
@@ -288,7 +311,7 @@ def run(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | None 
                         "insufficient data", [why])  # fmt: skip
         return _finish(report, results)
     cache: dict = {}
-    runs = {r: follow(p, r, spec.first, spec.round_trip_bp, cache) for r in
+    runs = {r: follow(p, r, spec.first, spec.round_trip_bp, cache, root) for r in
             dict.fromkeys([*spec.variants, *spec.trials])}  # fmt: skip
     if not any(np.any(d.net != 0) for d in runs.values()):
         report = Report(spec, prov, len(p.symbols), [], [], float("nan"), [], None, float("nan"),
@@ -342,7 +365,24 @@ def final(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | Non
     p = xs.load(root, spec.holdout_first, spec.holdout_last, held_out=True)
     if not p.symbols or not np.isfinite(p.close[p.dates.index(spec.holdout_first) :]).any():
         raise ex.ExperimentError("no daily bars in the held-out period")
-    d = follow(p, spec.primary, spec.holdout_first, spec.round_trip_bp, {})
+    cache: dict = {}
+    if spec.primary.hours:  # the hour bars there first, or nothing is computed
+        h, start = spec.primary.hours, p.dates.index(spec.holdout_first)
+        inu = cache[spec.primary.top] = xs.universe(p, spec.primary.top)
+        lag = xs.lagged(p, root, [h], held_out=True)[h]
+        cache[("r", h)] = lag.r
+        need = inu[start:-1]
+        got = lag.priced[start:-1] & lag.priced[start + 1 :]
+        share = float(got[need].mean()) if need.any() else 0.0
+        if share < MIN_PRICED:
+            short = (need & ~got).sum(axis=0)
+            names = [p.symbols[j] for j in np.argsort(-short, kind="stable") if short[j]]
+            raise ex.ExperimentError(
+                f"hour bars at both ends for {share:.1%} of the held-out universe's coin-days "
+                f"(at least {MIN_PRICED:.0%} asked): fetch them with scripts/fetch_hourly.py "
+                f"for {', '.join(names)}; nothing was computed or recorded"
+            )
+    d = follow(p, spec.primary, spec.holdout_first, spec.round_trip_bp, cache, root, True)
     s = score(d, spec.nw_lags)
     up = sum(v > 0 for v in s["by_year_pct"].values())
     beta = s["beta"] if s["beta"] is not None else float("nan")

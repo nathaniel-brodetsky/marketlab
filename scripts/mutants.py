@@ -1176,6 +1176,24 @@ M = [
         '    sub = f"klines/{sym}/1d" if kind == "klines" else f"fundingRate/{sym}"',
         "the hour bars looked for among the daily ones",
     ),
+    (
+        "marketlab/xsection_kind.py",
+        "        if rule.hours == 0:",
+        "        if True:",
+        "the hypothesis traded at the close whatever its hour",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        if share < MIN_PRICED:",
+        "        if False:",
+        "the held-out run without its hour bars",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        lag = xs.lagged(p, root, [h], held_out=True)[h]",
+        "        lag = xs.lagged(p, root, [h])[h]",
+        "the held-out run refused its own hour bars",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

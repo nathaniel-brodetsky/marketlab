@@ -2,12 +2,13 @@
 where there is none; the development run reads no held-out day; the specification checked;
 the committed hypothesis 009; the whole of it through the command."""
 
+import zipfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 from test_tradeflow import PROV
-from test_xsection import write
+from test_xsection import write, zigzag
 
 from marketlab import experiment as ex
 from marketlab import xsection_kind as xk
@@ -145,6 +146,7 @@ def test_bad_specifications_are_refused(tmp_path):
         "hold at least 1 day": SPEC.replace("- {hold: 1}\ntrials", "- {hold: 0}\ntrials"),
         "q between 0 and 0.5": SPEC.replace("q: 0.2", "q: 0.5"),
         "top at least 10": SPEC.replace("top: 20", "top: 5"),
+        "hours from 0 to 23": SPEC.replace("q: 0.2}", "q: 0.2, hours: 24}"),
         "costs must not": SPEC.replace("round_trip_bp: 9.0", "round_trip_bp: -1"),
         "`costs` is missing": SPEC.replace("costs: {round_trip_bp: 9.0}\n", ""),
     }
@@ -194,3 +196,46 @@ def test_end_to_end_through_the_command(tmp_path, capsys):
     assert main(["experiment", "list", "--results", str(tmp_path / "results"),
                  "--experiments", str(tmp_path / "experiments")]) == 0  # fmt: skip
     assert "confirmed" in capsys.readouterr().out
+
+
+def test_a_rule_traded_hours_after_the_close(tmp_path):
+    # every day's move made in its first two hours: a reversal pays traded at the close and
+    # loses traded four hours later; the held-out run checks its hour bars before anything
+    zigzag(tmp_path / "d", days=DAYS, first="2021-11-01")
+    late = SPEC.replace("rule: {signal: carry, hold: 7, top: 20, q: 0.2}",
+                        "rule: {signal: rev1, hold: 1, top: 12, q: 0.2, hours: 4}").replace(
+        "variants:\n  - {hold: 1}", "variants:\n  - {hours: 0}")  # fmt: skip
+    spec = xk.load_spec(spec_file(tmp_path, late))
+    assert spec.primary == xk.Rule("rev1", 1, 12, 0.2, 4) and spec.variants[1].hours == 0
+    assert spec.primary.name.endswith(", traded 4 h after the close")
+    one = tmp_path / "d" / "um" / "klines" / "C00USDT" / "1h" / "C00USDT-1h-2024-02.zip"
+    good = one.read_bytes()
+    one.write_text("not a zip")  # a held-out month: the development run never opens it
+    r = xk.run(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+    assert r.table[0]["annual_pct"] < -1000 < 1000 < r.table[1]["annual_pct"]
+    assert r.table[0]["priced"] > 0.99
+    with pytest.raises(zipfile.BadZipFile):  # the held-out run reads it
+        xk.final(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+    one.write_bytes(good)
+    year = {f: f.read_bytes() for f in one.parent.glob("C00USDT-1h-2024-*.zip")}
+    for f in year:  # a coin of twelve without its held-out hour bars: 92% of the coin-days
+        f.unlink()
+    with pytest.raises(ex.ExperimentError, match="for C00USDT; nothing was computed or recorded"):
+        xk.final(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+    assert not (tmp_path / "results" / "031-planted-xsection.holdout.json").exists()
+    for f, data in year.items():
+        f.write_bytes(data)
+    rec = xk.final(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+    assert not rec["confirmed"] and rec["summary"]["annual_pct"] < -1000
+    assert rec["rule"].endswith(", traded 4 h after the close")
+
+
+def test_the_committed_momentum_hypothesis_loads():
+    root = Path(__file__).resolve().parents[1] / "experiments"
+    spec = xk.load_spec(root / "010-xsection-momentum.yaml")
+    assert spec.primary == xk.Rule("mom7", 1, 50, 0.2, 1)
+    assert [(v.signal, v.hold, v.hours) for v in spec.variants] == [
+        ("mom7", 1, 1), ("mom7", 7, 1), ("mom30", 1, 1)]  # fmt: skip
+    assert len(spec.trials) == 7 and all(t.hours == 1 for t in spec.trials)
+    assert (spec.holdout_first, spec.holdout_last) == ("2024-01-01", "2026-10-31")
+    assert spec.min_dsr is None and spec.min_positive_years == 2

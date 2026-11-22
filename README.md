@@ -444,7 +444,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 194 in all, each caught.
+it is compared with and a taker filled with no latency: 197 in all, each caught.
 
 ## Numbers
 
@@ -623,10 +623,19 @@ fairly). The development years were looked at first, so the test is the held-out
 January 2024 .. October 2026, opened once with `--final`: confirmed if its mean is above
 zero at 5% one-sided, it was up in at least two of its three years, and its beta to the
 universe (equal weights) is within 0.3. Nothing but that run reads a day after 2023-12-31.
+A rule may be traded `hours` after the daily close (from the hourly bars, as `marketlab
+xsection --hours` does); its held-out run first checks that the held-out universe has hour
+bars at both ends of at least 98% of its coin-days, and otherwise stops, naming the coins
+short of them, before computing or recording anything.
+`experiments/010-xsection-momentum.yaml` is the second, written before either held-out run:
+momentum over 7 days, rebalanced daily, traded an hour after the close (an hour one can
+trade at, not the best of the hours looked at), the same universe, sides, costs, held-out
+period and bars as 009.
 `tests/test_xsection_kind.py` passes a planted carry and confirms it once, fails one where
 the funding does not last, shows the development run unchanged when the held-out prices
-are, makes the same Sharpe ratio worth less against trials that differ more, and runs it
-all through the command.
+are, makes the same Sharpe ratio worth less against trials that differ more, trades a rule
+hours after the close (and its held-out run stops without its hour bars, recording
+nothing), and runs it all through the command.
 
 ## What has been found
 
@@ -642,7 +651,8 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 006 screen of 44 trade-only signals | screened, held out confirmed 3/3 | realized volatility over 5 and 1 min, intensity over 5 min, against the size of the next 30 s: IC 0.32 to 0.34 held out |
 | 007 trade flow against a taker's 9 bp | failed on development, held-out months not opened | best 3.1 +- 1.0 bp a trade (60 min) |
 | 008 funding carry, spot against the perpetual | passed, held out confirmed | 13.9% a year of the notional 2020 .. 2023 (16.6, 29.8, 2.1, 6.9 by year), 6.0% over January 2024 .. October 2026; holding always 6.9% |
-| 009 funding carry across coins | written, not run yet | |
+| 009 funding carry across coins | passed on development (deflated Sharpe 0.50, reported); held out not opened | +36.4% a year 2020 .. 2023, Sharpe from months 1.42 |
+| 010 momentum across coins, an hour after the close | written, not run yet | |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
@@ -743,7 +753,8 @@ carry daily 0.02 and +44.1%, momentum over 7 days -0.04 and +30.2% (from +56.1%)
 is in the first day after the signal.
 
 How much of it is in the first hours, hourly bars say. `--list-universe FILE` writes every
-perpetual ever in the universe; `python scripts/fetch_hourly.py --symbols-file FILE --start
+perpetual ever in the universe (`--list-coins FILE`, every perpetual on a coin under the
+data); `python scripts/fetch_hourly.py --symbols-file FILE --start
 2020-01-01 --end 2023-12-31` downloads their hourly klines from the archive (each monthly
 file checked against its checksum, under `um/klines/<SYMBOL>/1h/`) for the months in which
 each has daily bars; and `--hours 0 1 2 4 8 --hour-rules mom7:1 carry:7` trades each rule,

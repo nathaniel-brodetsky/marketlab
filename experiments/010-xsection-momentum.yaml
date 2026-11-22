@@ -1,0 +1,69 @@
+# Written before any run of this hypothesis and before the held-out period of 009 (the
+# same one) is opened; after the rough look (`marketlab xsection`, patches 0024 .. 0030) on
+# the same development years. The development run is therefore not out of sample: these
+# numbers were seen first [backtest, 2020-01-01 .. 2023-12-31, the 678 perpetuals on coins,
+# those gone from Binance's list included]: momentum over 7 days rebalanced daily, traded at
+# the close, +56.1% a year net of 9 bp a round trip, Sharpe from months 1.63, by year +78,
+# +104, +13, +30%; its rank IC negative (-0.039) while its P&L is positive, because its top
+# fifth's next day has a mean of +40 bp and a median of -41 bp: most leaders fall back, a
+# few keep running; +42.2% without its ten best coin-days, beta to the universe -0.04; and
+# traded hours after the close, from hourly bars: +56.2% at 0 h, +50.5% at 1 h (Sharpe
+# 1.40), +49.6% at 2 h, +49.3% at 4 h, +50.6% at 8 h, +46.9% at 12 h, +30.2% a day late.
+# The hour is chosen as one a person or a program can trade at, not as the best of them.
+# Seven rules were looked at (the trials below), at six hours each.
+#
+# The held-out bars, funding and hour bars (2024-01-01 .. 2026-10-31) may be on disk, but no
+# price or rate after 2023-12-31 has gone into any cross-sectional computation:
+# `xsection.load` and `xsection.lagged` refuse a day after it unless a `--final` asks. One
+# coin's held-out period is known: 008's held-out run read BTCUSDT's funding and hourly
+# prices over 2024-01 .. 2026-10, one of the fifty here.
+id: "010"
+name: xsection-momentum
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, long those whose close rose most over the last 7 days (strictly in the top
+  20%), short those that fell most (strictly in the bottom 20%), half the capital a side in
+  equal weights, decided at the daily close and traded one hour later at the open of that
+  hour's bar, rebalanced every day, paying 9 bp a round trip on every unit traded and the
+  funding as settled: its daily net is above zero over 2024-01-01 .. 2026-10-31.
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2024-01-01, to: 2026-10-31}   # opened once, for the primary only
+
+rule:                     # the primary
+  signal: mom7            # the log change of the daily close over 7 days
+  hold: 1                 # days between rebalances
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # a side
+  hours: 1                # traded this long after the daily close
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 7}
+  - {signal: mom30}
+
+trials:                   # every rule the rough look reported, traded at the same hour
+  - {hold: 7}
+  - {signal: mom30}
+  - {signal: mom30, hold: 7}
+  - {signal: rev1}
+  - {signal: carry}
+  - {signal: carry, hold: 7}
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20, as for 008). The leaders
+# it buys are often moving fast; what an order pays beyond the fee there is not modelled.
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 3 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 7 trials is reported, not a bar, as for 009
+  min_positive_years: 2   # of 2024, 2025, 2026 (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)
