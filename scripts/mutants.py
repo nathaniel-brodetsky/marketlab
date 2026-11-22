@@ -824,14 +824,14 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        '    files = sorted(f for f in folder.glob("*.csv") if f.stem not in NOT_COINS)',
-        '    files = sorted(folder.glob("*.csv"))',
+        '    every = sorted(f for f in folder.glob("*.csv") if f.stem not in NOT_COINS)',
+        '    every = sorted(folder.glob("*.csv"))',
         "a stablecoin and the indices ranked with the coins",
     ),
     (
         "marketlab/xsection.py",
-        "            n = int((settled & ~np.isfinite(close[:, j])).sum())",
-        "            n = int((settled & np.isfinite(close[:, j])).sum())",
+        "            n = int(((settlements[:, j] > 0) & ~np.isfinite(close[:, j])).sum())",
+        "            n = int(((settlements[:, j] > 0) & np.isfinite(close[:, j])).sum())",
         "days without bars counted as the days with them",
     ),
     (
@@ -995,6 +995,84 @@ M = [
         'if all(x["real"] is not None and x["real"] > x["threshold"] for x in sur.values()):',
         "if True:",
         "the screen takes a signal its surrogates refuse",
+    ),
+    (
+        "marketlab/xsection.py",
+        '    coin = kind.is_in(["", "COIN"])',
+        "    coin = kind == kind",
+        "every underlying taken for a coin",
+    ),
+    (
+        "marketlab/xsection.py",
+        '        keep |= set(pl.read_csv(um / "gone.csv", infer_schema=False)["symbol"])',
+        "        keep |= set()",
+        "the perpetuals gone from the list left out",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    files = [f for f in every if keep is None or f.stem in keep]",
+        "    files = every",
+        "a file neither listed nor gone taken for a perpetual",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            if len(np.unique(t)) != len(t):  # summed twice, it would double the day's rate",
+        "            if False:",
+        "a settlement given twice summed twice",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            np.add.at(settlements[:, j], fd[inside] - d0, 1)",
+        "            settlements[fd[inside] - d0, j] = 1",
+        "a day's settlements counted as one",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    f = np.where(inu, np.abs(np.nan_to_num(p.funding)), 0.0)[start:]",
+        "    f = np.abs(np.nan_to_num(p.funding))[start:]",
+        "the largest funding read outside the universe",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    g, mk = contrib.sum(axis=1)[start + 1 :], mkt[start + 1 :]",
+        "    g, mk = contrib.sum(axis=1)[start + 1 :], mkt[start:-1]",
+        "the beta against the day before's market",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        net_less_beta=float((pnl[start:] - beta * mkt[start:]).sum() * pct),",
+        "        net_less_beta=float((pnl[start:] + beta * mkt[start:]).sum() * pct),",
+        "the net less beta adds it",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    late, _, _ = portfolio(_lag(x, 1), inu_late, r, start, hold, q, cost_bp)",
+        "    late, _, _ = portfolio(x, inu_late, r, start, hold, q, cost_bp)",
+        "decided a day late on the day's own signal",
+    ),
+    (
+        "scripts/fetch_universe.py",
+        '           for s in info.get("symbols", []) if s.get("quoteAsset") == quote]  # fmt: skip',
+        '           for s in info.get("symbols", []) if s.get("quoteAsset") == quote\n           and s.get("contractType") == "PERPETUAL"]',
+        "the list of contracts only the perpetuals",
+    ),
+    (
+        "scripts/fetch_universe.py",
+        "    if a.list_only:",
+        "    if False:",
+        "the lists only download the rest",
+    ),
+    (
+        "scripts/fetch_archive_universe.py",
+        "    gone = [s for s in archive if s not in listed and s not in known]",
+        "    gone = [s for s in archive if s not in listed]",
+        "a contract of another type taken for one gone",
+    ),
+    (
+        "scripts/fetch_archive_universe.py",
+        "            elif newest and last >= newest:",
+        "            elif False:",
+        "a perpetual still trading taken for one gone",
     ),
 ]
 survived = []

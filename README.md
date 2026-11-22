@@ -444,7 +444,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 164 in all, each caught.
+it is compared with and a taker filled with no latency: 177 in all, each caught.
 
 ## Numbers
 
@@ -653,7 +653,10 @@ signals, and works out the returns on a grid of trades and between hourly closes
 Binance's public endpoints, every USD-M perpetual quoted in USDT that Binance lists, of any
 status (`binance-data/um/universe.csv`), its daily bars (`um/klines1d/<SYMBOL>.csv`) and
 its funding history (as `fetch_funding.py` writes it), spacing its requests inside
-Binance's limits; run again, it asks only for what is missing.
+Binance's limits; run again, it asks only for what is missing. It also writes every
+contract quoted in USDT, perpetual or not, with the contract and underlying types Binance
+gives (`um/contracts.csv`), and the underlying's type of each perpetual in `universe.csv`;
+`--list-only` writes the two lists and downloads nothing else.
 
 Binance's list keeps a perpetual for a while after it is delisted, then drops it, and its
 API serves no bars for a coin's earlier listing once the coin is listed again. So
@@ -663,7 +666,12 @@ perpetuals (an S3 listing), and for those gone from Binance's list, and those li
 days of funding and no bar, downloads the monthly daily-kline files (each checked against
 its checksum) and merges them into `um/klines1d/`, a day already there kept as it is; for
 the gone ones, their funding from the API or, where it serves none, from the archive's
-monthly funding files. The gone ones are listed in `um/gone.csv`. The listing's address
+monthly funding files. The gone ones are listed in `um/gone.csv`. Gone means in neither of
+Binance's lists: the archive also keeps contracts on shares, funds, metals and companies
+not yet public (AAPLUSDT, QQQUSDT, XAUUSDT, OPENAIUSDT: over two hundred, from December
+2025 on), which Binance lists under other contract types, or not at all;
+one in `contracts.csv` under another type, and one in no list but with a bar on the last
+day the listed perpetuals have one, are left out. The listing's address
 and the funding files' columns are as published when this was written; anything that does
 not match is reported, not guessed at.
 
@@ -677,10 +685,14 @@ days, a round trip of 9 bp on every unit traded, the funding paid or received in
 It reports each signal's daily rank IC and the portfolio's gross, costs and net a year,
 Sharpe from months and drawdown. It is not a hypothesis: nothing in it is written before it
 runs, and it reads nothing after 2023-12-31, so that 2024 .. 2026 stay held out for the
-hypothesis written about whatever it finds. The coins are those Binance still lists;
-coins gone from its list are missing, which flatters a rule that buys losers. Seven
-contracts that are not a coin's own price are left out: USDC, the BTC-dominance, DeFi,
-Bluebird and Football indices, and two gold tokens. A perpetual that settled funding on a day for which Binance
+hypothesis written about whatever it finds. The coins are the perpetuals in
+`universe.csv` on an underlying Binance calls a coin, and those in `gone.csv`; without
+`gone.csv` the coins gone from the list are missing, which flatters a rule that buys losers.
+Any other file under `um/klines1d` is left out and named, and so are seven contracts that
+are not a coin's own price: USDC, the BTC-dominance, DeFi, Bluebird and Football indices,
+and two gold tokens. A settlement time given twice in a funding file stops the run (summed
+twice, it would double the day's rate), and the command names the largest funding a coin
+in the universe paid in one day, with how many settlements made it. A perpetual that settled funding on a day for which Binance
 serves no daily bar (an earlier listing of a coin listed again, for one) is missing from
 the universe on that day; the command says how many such days there are, and for which
 coins. Every file is read as text and then cast, since a column whose first rows look
@@ -696,12 +708,24 @@ carry rebalanced daily +55.9% a year net, monthly Sharpe 1.83; momentum over 7 d
 Momentum earning with a negative IC, and the reversal losing with a positive one, says the
 P&L comes from the tails of the cross-section, not from its body; whether that is a few
 coin-days, and how much of it the missing coins would take back, is what the breakdown and
-the archive are for.
+the archive are for. With the gone coins in [backtest, 2020 .. 2023]: carry daily +46.2%
+(Sharpe 1.50), carry weekly +36.4% (1.42), momentum over 7 days +57.0% (1.66), the
+reversal -36.2%; without the ten best coin-days +29.1%, +20.2% and +43.1%. Carry earns
+its funding steadily (+27.4% a year, both legs) and its price leg from the tails: in every
+fifth of the signal the median next day is 0 bp or below while the mean rises from 1.5 to
+31.9 bp; momentum's top fifth has a mean of +40.5 bp and a median of -40.5 bp. Two checks
+follow the breakdown: the portfolio's beta to the universe (equal weights) and its net less
+beta times it, and the same portfolio decided a day late (the day before's signal and
+universe), which shows how much of it rests on trading at the very close its signal was
+read at.
 `tests/test_xsection.py` works the universe, the portfolio, its costs and its funding out
 by hand, finds a planted momentum and nothing where there is none, shows the held-out
 years are neither asked for nor read, and that the breakdown adds up to the net and finds
-a planted jump; `tests/test_fetch.py` runs both downloads against a local server that
-also answers as the archive's S3 listing does.
+a planted jump, the beta of a portfolio that only rides the market and nothing left once it
+is taken out, and a one-day reversal that pays on time and costs a day late; that only the
+perpetuals on coins, listed or gone, are read, and a settlement given twice is refused;
+`tests/test_fetch.py` runs both downloads against a local server that also answers as the
+archive's S3 listing does, with contracts of other types and one still trading in it.
 
 ## Tests
 

@@ -8,8 +8,11 @@ library only, Python 3.9 or newer, any OS. Run it after fetch_universe.py, on it
 
 1. The archive's perpetuals: an S3 listing of data/futures/um/monthly/klines/, those
    quoted in USDT and without a delivery date.
-2. Which to fill in: those not in OUT/um/universe.csv (gone from Binance's list), and
-   those in it that settled funding on a day with no bar in OUT/um/klines1d/<SYMBOL>.csv.
+2. Which to fill in: those in neither OUT/um/universe.csv nor OUT/um/contracts.csv (gone
+   from Binance's list; one it lists as a contract of another type is left out), and
+   those in universe.csv that settled funding on a day with no bar in
+   OUT/um/klines1d/<SYMBOL>.csv. One not in the list with a bar on the listed perpetuals'
+   last day is still trading, so not gone, wherever Binance lists it: left out too.
 3. For each, the monthly 1d klines the archive has in the dates (each checked against its
    checksum, kept under OUT/um/klines/<SYMBOL>/1d/), merged into klines1d/<SYMBOL>.csv: a
    day already there is kept as it is.
@@ -106,6 +109,15 @@ def _day(t: int) -> int:
 
 def _date(t: str) -> str:
     return (dt.date(1970, 1, 1) + dt.timedelta(days=_day(int(t)))).isoformat()
+
+
+def _last_day(out: Path, sym: str) -> str:
+    """The day of the last bar in klines1d/<sym>.csv, or "" without one."""
+    path = out / "um" / "klines1d" / f"{sym}.csv"
+    if not path.exists():
+        return ""
+    lines = [x for x in path.read_text().splitlines()[1:] if x.strip()]
+    return _date(lines[-1].split(",")[0]) if lines else ""
 
 
 def unbarred(out: Path, sym: str, lo: int, hi: int) -> int:
@@ -241,10 +253,14 @@ def main(argv: list[str] | None = None) -> int:
     if a.end < a.start:
         raise SystemExit(f"--end {a.end} is before --start {a.start}")
     listed_file = a.out / "um" / "universe.csv"
-    if not listed_file.exists():
-        raise SystemExit(f"no {listed_file}: run fetch_universe.py on this folder first")
+    contracts_file = a.out / "um" / "contracts.csv"
+    for path in (listed_file, contracts_file):
+        if not path.exists():
+            raise SystemExit(f"no {path}: run fetch_universe.py --list-only on this folder first")
     with listed_file.open(newline="") as f:
         listed = {row["symbol"] for row in csv.DictReader(f)}
+    with contracts_file.open(newline="") as f:
+        known = {row["symbol"]: row["contract_type"] for row in csv.DictReader(f)}
     lo, hi = ff.ms(a.start), ff.ms(a.end + dt.timedelta(days=1)) - 1
     months = set(fb.months(a.start, a.end))
     try:
@@ -253,10 +269,23 @@ def main(argv: list[str] | None = None) -> int:
         print(f"FAILED: the archive's list of perpetuals: {e}", file=sys.stderr)
         return 1
     archive = perpetuals(prefixes)
-    gone = [s for s in archive if s not in listed]
+    # gone: in the archive, not in Binance's list of contracts at all; a contract of another
+    # type there (shares, funds, metals, whatever Binance calls them) is no coin's perpetual
+    other = {s: known[s] for s in archive if s not in listed and s in known}
+    gone = [s for s in archive if s not in listed and s not in known]
     gaps = {s: n for s in archive if s in listed and (n := unbarred(a.out, s, lo, hi))}
     print(f"{len(archive)} USDT perpetuals in the archive: {len(gone)} gone from Binance's "
           f"list, {len(gaps)} listed with days of funding and no bar")  # fmt: skip
+    if other:
+        types: dict[str, int] = {}
+        for t in other.values():
+            types[t] = types.get(t, 0) + 1
+        print(f"left out, {len(other)} Binance lists as contracts of other types: "
+              + ", ".join(f"{t or '?'} {n}" for t, n in sorted(types.items())))  # fmt: skip
+    # the last day the listed ones have a bar (to --end at most): a perpetual that has one
+    # then is still trading, gone from the list or not
+    newest = min(max((_last_day(a.out, s) for s in listed), default=""), a.end.isoformat())
+    trading: list[str] = []
     failed: list[str] = []
     gone_rows = []
     gone_file = a.out / "um" / "gone.csv"
@@ -267,15 +296,18 @@ def main(argv: list[str] | None = None) -> int:
             added, days, bad = fill_bars(a, sym, months, lo, hi)
             failed += [f"{sym} {b}" for b in bad]
             line = f"  [{n}/{len(targets)}] {sym:<16} "
+            bars = fu.read_rows(a.out / "um" / "klines1d" / f"{sym}.csv", fu.KLINE_COLUMNS)
+            first, last = (_date(bars[0][0]), _date(bars[-1][0])) if bars else ("", "")
             if sym in gaps:
                 line += f"listed   +{added} days of {gaps[sym]} without a bar"
+            elif newest and last >= newest:
+                trading.append(sym)
+                line += f"trading  {days} days {first} .. {last}: not gone, left out"
             else:
                 settled, source, bad = fill_funding(a, sym, months, lo, hi)
                 failed += [f"{sym} {b}" for b in bad]
                 if source == "file":  # fetched before: where from, as recorded then
                     source = before.get(sym, source)
-                bars = fu.read_rows(a.out / "um" / "klines1d" / f"{sym}.csv", fu.KLINE_COLUMNS)
-                first, last = (_date(bars[0][0]), _date(bars[-1][0])) if bars else ("", "")
                 gone_rows.append([sym, first, last, days, settled, source])
                 line += f"gone     {days} days {first} .. {last}, {settled} settlements ({source})"
             print(line, flush=True)
@@ -284,7 +316,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [{n}/{len(targets)}] {sym:<16} FAILED: {e}", file=sys.stderr, flush=True)
     fu.write_rows(gone_file, GONE_COLUMNS, gone_rows)
     with_bars = sum(1 for r in gone_rows if r[3])
-    print(f"done: {with_bars} of {len(gone)} gone perpetuals with bars, "
+    if trading:
+        print(f"left out, {len(trading)} not in Binance's list yet trading on {newest}: "
+              + ", ".join(trading[:12]) + (" ..." if len(trading) > 12 else ""))  # fmt: skip
+    print(f"done: {with_bars} of {len(gone_rows)} gone perpetuals with bars, "
           f"{sum(1 for r in gone_rows if r[4])} with funding -> {a.out / 'um'}")  # fmt: skip
     if failed:
         print(f"FAILED: {', '.join(failed)}", file=sys.stderr)

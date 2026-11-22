@@ -385,6 +385,25 @@ def cmd_xsection(a: argparse.Namespace) -> int:
         f"signal, short the bottom {a.q:.0%}; a round trip {a.cost:g} bp; funding in the P&L; "
         f"left out, not coins: {', '.join(sorted(xs.NOT_COINS))}"
     )
+    if not p.listed:
+        print(f"no {a.data}/um/universe.csv: every file under um/klines1d taken for a perpetual "
+              "on a coin (scripts/fetch_universe.py --list-only writes it)")  # fmt: skip
+    if p.other_type:
+        kinds: dict[str, int] = {}
+        for t in p.other_type.values():
+            kinds[t] = kinds.get(t, 0) + 1
+        print(f"left out, {len(p.other_type)} perpetuals on an underlying Binance does not call "
+              "a coin: " + ", ".join(f"{t} {n}" for t, n in sorted(kinds.items())))  # fmt: skip
+    if p.unlisted:
+        print(f"left out, {len(p.unlisted)} files of contracts neither listed as perpetuals nor "
+              "gone (um/universe.csv, um/gone.csv): " + ", ".join(p.unlisted[:10])
+              + (" ..." if len(p.unlisted) > 10 else ""))  # fmt: skip
+    big = xs.largest_funding(p, xs.universe(p, a.top), p.dates.index(a.first)
+                             if a.first in p.dates else 0)  # fmt: skip
+    if big:
+        print("the largest funding in a day, in the universe: " + ", ".join(
+            f"{b['symbol']} {b['date']} {b['pct']:+.2f}% ({b['settlements']} settlements)"
+            for b in big))  # fmt: skip
     if p.unbarred:
         most = sorted(p.unbarred.items(), key=lambda kv: (-kv[1], kv[0]))
         print(
@@ -446,6 +465,12 @@ def cmd_xsection(a: argparse.Namespace) -> int:
             f"with the largest contributions, % of the capital, best first, then the worst. "
             f"The 10 best: {e.best_share:.0%} of the gross; the net without them "
             f"{e.net_without_best:+.1f}% a year"
+        )
+        print(
+            f"beta to the universe (equal weights, {e.market_pct:+.1f}% a year): {e.beta:.2f}; "
+            f"the net less beta times it {e.net_less_beta:+.1f}% a year. Decided a day late "
+            f"(the day before's signal and universe): net {e.late_net:+.1f}% a year, Sharpe "
+            f"{e.late_sharpe:.2f}"
         )
     return 0
 

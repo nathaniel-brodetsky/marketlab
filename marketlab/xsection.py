@@ -24,11 +24,13 @@ Each UTC day `d`, at its close:
 
 Reported: the daily rank IC of each signal against the next `hold` days' return (Newey-West
 over `hold` days), and the portfolio's gross, costs, net, Sharpe from months, drawdown.
-The universe is the perpetuals Binance still lists: coins delisted and gone from its list
-are missing, which flatters anything that buys losers. Seven contracts are not a coin's own
-price and are left out (`NOT_COINS`). A perpetual that settled funding on a day with no
-daily bar (often an earlier listing whose bars Binance no longer serves) is missing from
-the universe on that day; `Panel.unbarred` counts those days.
+The universe is the perpetuals in um/universe.csv (those Binance lists, on an underlying it
+calls a coin) and in um/gone.csv (those gone from its list, from its archive); without
+gone.csv, coins delisted are missing, which flatters anything that buys losers. Any other
+file under um/klines1d (a contract on shares, a fund or a metal, say) is left out, and so
+are seven contracts that are not a coin's own price (`NOT_COINS`). A perpetual that settled
+funding on a day with no daily bar (often an earlier listing whose bars Binance no longer
+serves) is missing from the universe on that day; `Panel.unbarred` counts those days.
 """
 
 from __future__ import annotations
@@ -65,6 +67,12 @@ class Panel:
     qvol: np.ndarray  # quote volume, NaN without a bar
     funding: np.ndarray  # sum of the rates settled that day; NaN without a funding history
     unbarred: dict[str, int] = field(default_factory=dict)  # days with funding, no bar
+    settlements: np.ndarray | None = None  # days x symbols: how many settled that day
+    # left out, with um/universe.csv there: perpetuals on an underlying Binance does not call
+    # a coin (symbol: its type), and files of contracts neither listed as perpetuals nor gone
+    other_type: dict[str, str] = field(default_factory=dict)
+    unlisted: list[str] = field(default_factory=list)
+    listed: bool = False  # um/universe.csv was there to say which files are perpetuals
 
 
 def read_columns(path: Path, types: dict[str, pl.DataType]) -> pl.DataFrame:
@@ -78,6 +86,26 @@ def _day(ms: np.ndarray) -> np.ndarray:
     return ms // 86_400_000
 
 
+def perpetuals(root: str | Path) -> tuple[set[str] | None, dict[str, str]]:
+    """The symbols that are perpetuals on coins, by um/universe.csv (those Binance lists) and
+    um/gone.csv (those gone from its list, from its archive), or None without universe.csv;
+    and the listed perpetuals on an underlying of another type than a coin, with the type."""
+    um = Path(root) / "um"
+    if not (um / "universe.csv").exists():
+        return None, {}
+    listed = pl.read_csv(um / "universe.csv", infer_schema=False)
+    if "underlying_type" not in listed.columns:
+        listed = listed.with_columns(underlying_type=pl.lit(""))
+    kind = listed["underlying_type"].fill_null("").str.to_uppercase()
+    coin = kind.is_in(["", "COIN"])
+    names, kinds = listed["symbol"].filter(~coin), listed["underlying_type"].filter(~coin)
+    other = dict(zip(names, kinds, strict=True))
+    keep = set(listed["symbol"].filter(coin))
+    if (um / "gone.csv").exists():
+        keep |= set(pl.read_csv(um / "gone.csv", infer_schema=False)["symbol"])
+    return keep, other
+
+
 def load(root: str | Path, first: str, last: str) -> Panel:
     """Every perpetual's daily bars and funding up to `last`; the days from `first` on,
     with 40 days before it for the signals. `last` after `DEV_END` is refused."""
@@ -87,11 +115,16 @@ def load(root: str | Path, first: str, last: str) -> Panel:
     d1 = (dt.date.fromisoformat(last) - dt.date(1970, 1, 1)).days
     days = np.arange(d0, d1 + 1)
     folder = Path(root) / "um" / "klines1d"
-    files = sorted(f for f in folder.glob("*.csv") if f.stem not in NOT_COINS)
+    keep, other = perpetuals(root)
+    every = sorted(f for f in folder.glob("*.csv") if f.stem not in NOT_COINS)
+    files = [f for f in every if keep is None or f.stem in keep]
+    unlisted = [f.stem for f in every if keep is not None and f.stem not in keep
+                and f.stem not in other]  # fmt: skip
     symbols = [f.stem for f in files]
     close = np.full((len(days), len(files)), np.nan)
     qvol = np.full_like(close, np.nan)
     funding = np.full_like(close, np.nan)
+    settlements = np.zeros(close.shape, dtype=np.int64)
     unbarred: dict[str, int] = {}
     for j, f in enumerate(files):
         k = read_columns(f, KLINE_TYPES)
@@ -102,18 +135,38 @@ def load(root: str | Path, first: str, last: str) -> Panel:
         fr = Path(root) / "um" / "fundingRate" / f.stem / f"{f.stem}-fundingRate.csv"
         if fr.exists():
             r = read_columns(fr, FUNDING_TYPES)
-            fd = _day(r["funding_time"].to_numpy())
-            keep = (fd >= d0) & (fd <= d1)
+            t = r["funding_time"].to_numpy()
+            if len(np.unique(t)) != len(t):  # summed twice, it would double the day's rate
+                raise ValueError(f"{fr}: a settlement time given twice")
+            fd = _day(t)
+            inside = (fd >= d0) & (fd <= d1)
             col = np.zeros(len(days))
-            np.add.at(col, fd[keep] - d0, r["funding_rate"].to_numpy()[keep])
+            np.add.at(col, fd[inside] - d0, r["funding_rate"].to_numpy()[inside])
             funding[:, j] = col
-            settled = np.zeros(len(days), dtype=bool)
-            settled[fd[keep] - d0] = True
-            n = int((settled & ~np.isfinite(close[:, j])).sum())
+            np.add.at(settlements[:, j], fd[inside] - d0, 1)
+            n = int(((settlements[:, j] > 0) & ~np.isfinite(close[:, j])).sum())
             if n:
                 unbarred[f.stem] = n
     dates = [(dt.date(1970, 1, 1) + dt.timedelta(days=int(x))).isoformat() for x in days]
-    return Panel(dates, symbols, close, qvol, funding, unbarred)
+    return Panel(dates, symbols, close, qvol, funding, unbarred, settlements, other, unlisted,
+                 keep is not None)  # fmt: skip
+
+
+def largest_funding(p: Panel, inu: np.ndarray, start: int, n: int = 5) -> list[dict]:
+    """The `n` largest rates settled in one day by a perpetual in the universe that day,
+    either way, from `start` on: symbol, date, % and how many settlements made it."""
+    f = np.where(inu, np.abs(np.nan_to_num(p.funding)), 0.0)[start:]
+    count = p.settlements if p.settlements is not None else np.zeros(p.close.shape, int)
+    out = []
+    for k in np.argsort(-f.ravel(), kind="stable")[:n]:
+        i, j = divmod(int(k), f.shape[1])
+        if f[i, j] == 0:
+            break
+        i += start
+        out.append({"symbol": p.symbols[j], "date": p.dates[i],
+                    "pct": float(p.funding[i, j] * 100),
+                    "settlements": int(count[i, j])})  # fmt: skip
+    return out
 
 
 def _lag(a: np.ndarray, k: int) -> np.ndarray:
@@ -325,6 +378,11 @@ class Explained:
     coin_days: list[dict]  # the largest contributions of one coin on one day, either way
     best_share: float  # of the gross, the 10 best coin-days
     net_without_best: float  # the net without the 10 best coin-days
+    market_pct: float  # the universe, equal weights, held as the portfolio's day is
+    beta: float  # of the portfolio's gross day on the market's
+    net_less_beta: float  # the net less beta times the market
+    late_net: float  # the same portfolio decided a day late: on the day before's signal
+    late_sharpe: float
 
 
 def explain(
@@ -339,7 +397,10 @@ def explain(
 ) -> Explained:  # fmt: skip
     """Breaks one portfolio's P&L down by year, by leg, into price and funding, and by coin
     and day; and the next day's return by fifth of the signal, mean and median, which shows
-    where a rank IC and a P&L of opposite signs part."""
+    where a rank IC and a P&L of opposite signs part. Then two checks: the portfolio's beta
+    to the universe (equal weights), so that a long leg that only rides a rising market is
+    seen; and the same portfolio decided a day late, which shows how much of it depends on
+    trading at the very close its signal was read at."""
     x = signals(p)[name]
     r, inu = daily_returns(p), universe(p, top)
     start = p.dates.index(first) if first in p.dates else 0
@@ -404,6 +465,21 @@ def explain(
                           "contribution_pct": float(contrib[i, j] * 100)})  # fmt: skip
     gross = contrib[start:].sum()
     best = flat[order[::-1][:n_days]].sum()
+    # the market a day: the universe the portfolio was decided in, equal weights, over the
+    # day the portfolio is held
+    mkt = np.zeros(len(p.dates))
+    for i in range(start + 1, len(p.dates)):
+        m = inu[i - 1] & np.isfinite(r[i])
+        if m.any():
+            mkt[i] = r[i, m].mean()
+    g, mk = contrib.sum(axis=1)[start + 1 :], mkt[start + 1 :]
+    beta = float(np.cov(g, mk)[0, 1] / mk.var(ddof=1)) if mk.var() > 0 else float("nan")
+    # decided a day late: the signal and the universe of the day before
+    inu_late = np.zeros_like(inu)
+    inu_late[1:] = inu[:-1]
+    late, _, _ = portfolio(_lag(x, 1), inu_late, r, start, hold, q, cost_bp)
+    month = np.array([d[:7] for d in p.dates[start:]])
+    late_months = np.array([late[start:][month == mo].sum() for mo in dict.fromkeys(month)])
     return Explained(
         signal=name,
         hold=hold,
@@ -413,4 +489,9 @@ def explain(
         coin_days=coin_days,
         best_share=float(best / gross) if gross else float("nan"),
         net_without_best=float((pnl[start:].sum() - best) * pct),
+        market_pct=float(mkt[start:].sum() * pct),
+        beta=beta,
+        net_less_beta=float((pnl[start:] - beta * mkt[start:]).sum() * pct),
+        late_net=float(late[start:].sum() * pct),
+        late_sharpe=_sharpe(late_months),
     )

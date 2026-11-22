@@ -231,13 +231,17 @@ def _bars(first: str, n: int) -> list:
 def test_the_universe_of_perpetuals(server, tmp_path, capsys):
     info = {"symbols": [
         {"symbol": "AAAUSDT", "contractType": "PERPETUAL", "quoteAsset": "USDT",
-         "status": "TRADING", "onboardDate": 1577836800000, "baseAsset": "AAA"},
+         "status": "TRADING", "onboardDate": 1577836800000, "baseAsset": "AAA",
+         "underlyingType": "COIN"},
         {"symbol": "BBBUSDT", "contractType": "PERPETUAL", "quoteAsset": "USDT",
-         "status": "SETTLING", "onboardDate": 1600000000000, "baseAsset": "BBB"},
+         "status": "SETTLING", "onboardDate": 1600000000000, "baseAsset": "BBB",
+         "underlyingType": "INDEX"},
         {"symbol": "CCCUSDT_261225", "contractType": "CURRENT_QUARTER", "quoteAsset": "USDT"},
         {"symbol": "DDDBUSD", "contractType": "PERPETUAL", "quoteAsset": "BUSD"},
         {"symbol": "EEEUSDT", "contractType": "PERPETUAL", "quoteAsset": "USDT",
          "status": "CLOSE", "onboardDate": 1600000000000, "baseAsset": "EEE"},
+        {"symbol": "SHRUSDT", "contractType": "SHARE_PERPETUAL", "quoteAsset": "USDT",
+         "status": "TRADING", "underlyingType": "EQUITY"},
     ]}  # fmt: skip
     server.files["/fapi/v1/exchangeInfo"] = json.dumps(info).encode()
     server.klines["AAAUSDT"] = _bars("2020-01-01", 1600)
@@ -247,12 +251,29 @@ def test_the_universe_of_perpetuals(server, tmp_path, capsys):
                        _settlements(dt.datetime(2020, 1, 1, tzinfo=dt.UTC), 30)]  # fmt: skip
     args = ["--start", "2020-01-01", "--end", "2024-12-31", "--out", str(tmp_path),
             "--base-url", server.url, "--pause", "0", "--funding-pause", "0"]  # fmt: skip
+    # the lists only: nothing downloaded
+    lists = tmp_path / "lists"
+    assert fu.main([*args[:5], str(lists), *args[6:], "--list-only"]) == 0
+    assert not [c for c in server.calls if "klines" in c or "fundingRate" in c]
+    assert not (lists / "um" / "klines1d").exists()
+    out = capsys.readouterr().out
+    assert "TRADING 1; underlying ? 1, COIN 1, INDEX 1" in out
+    assert "2 other USDT contracts: CURRENT_QUARTER 1, SHARE_PERPETUAL 1" in out
+    assert (lists / "um" / "contracts.csv").read_text().splitlines() == [
+        "symbol,contract_type,underlying_type,status",
+        "AAAUSDT,PERPETUAL,COIN,TRADING",
+        "BBBUSDT,PERPETUAL,INDEX,SETTLING",
+        "CCCUSDT_261225,CURRENT_QUARTER,,",
+        "EEEUSDT,PERPETUAL,,CLOSE",
+        "SHRUSDT,SHARE_PERPETUAL,EQUITY,TRADING",
+    ]
     assert fu.main(args) == 0
     out = capsys.readouterr().out
     assert "3 USDT perpetuals: CLOSE 1, SETTLING 1, TRADING 1" in out
-    assert "EEEUSDT" in out and "no data served" in out
+    assert "EEEUSDT" in out and "no data served" in out and "SHRUSDT" not in out
     rows = (tmp_path / "um" / "universe.csv").read_text().splitlines()
-    assert rows[0] == "symbol,status,onboard_date,base,quote" and len(rows) == 4
+    assert rows[0] == "symbol,status,onboard_date,base,quote,underlying_type" and len(rows) == 4
+    assert rows[2] == "BBBUSDT,SETTLING,1600000000000,BBB,USDT,INDEX"
     a = (tmp_path / "um" / "klines1d" / "AAAUSDT.csv").read_text().splitlines()
     assert a[0] == "open_time,open,high,low,close,volume,quote_volume,trades"
     assert len(a) == 1 + 1600 and a[1].endswith(",1000.5,7")
@@ -338,13 +359,30 @@ def test_the_archive_fills_in_the_perpetuals_gone_and_the_bars_not_served(server
     # not perpetuals in USDT: a delivery contract and a BUSD one
     _archive(server, "AAAUSDT_210625", "klines", "2021-01", _month_bars("2021-01", 1.0))
     _archive(server, "CCCBUSD", "klines", "2021-01", _month_bars("2021-01", 1.0))
+    # not gone: SHRUSDT a contract of another type in Binance's list, TRDUSDT in no list
+    # but trading on the last day
+    _archive(server, "SHRUSDT", "klines", "2021-03", _month_bars("2021-03", 9.0))
+    for month in ("2021-06", "2021-07"):
+        _archive(server, "TRDUSDT", "klines", month, _month_bars(month, 8.0))
     server.page = 2  # the listing a page of two at a time
     args = ["--start", "2021-01-01", "--end", "2021-07-31", "--out", str(tmp_path),
             "--base-url", server.url, "--api-url", server.url, "--list-url",
             server.url + "/bucket", "--funding-pause", "0"]  # fmt: skip
+    with pytest.raises(SystemExit, match=r"contracts\.csv: run fetch_universe\.py --list-only"):
+        fa.main(args)
+    fu.write_rows(tmp_path / "um" / "contracts.csv", fu.CONTRACT_COLUMNS,
+                  [["AAAUSDT", "PERPETUAL", "COIN", "TRADING"],
+                   ["BBBUSDT", "PERPETUAL", "COIN", "TRADING"],
+                   ["SHRUSDT", "SHARE_PERPETUAL", "EQUITY", "TRADING"]])  # fmt: skip
     assert fa.main(args) == 0
     out = capsys.readouterr().out
-    assert "4 USDT perpetuals in the archive: 2 gone from Binance's list, 1 listed" in out
+    assert "6 USDT perpetuals in the archive: 3 gone from Binance's list, 1 listed" in out
+    assert "left out, 1 Binance lists as contracts of other types: SHARE_PERPETUAL 1" in out
+    assert "left out, 1 not in Binance's list yet trading on 2021-07-31: TRDUSDT" in out
+    assert "done: 2 of 2 gone perpetuals with bars, 2 with funding" in out
+    assert not any("SHRUSDT" in c for c in server.calls if c.endswith(".zip"))
+    assert not any("TRDUSDT" in c and "fundingRate" in c for c in server.calls)
+    assert not (tmp_path / "um" / "fundingRate" / "TRDUSDT").exists()
     a = fu.read_rows(tmp_path / "um" / "klines1d" / "AAAUSDT.csv", fu.KLINE_COLUMNS)
     days = [int(r[0]) for r in a]
     assert days == sorted(set(days)) and days[0] == t0 and len(a) == 151 + 61

@@ -6,7 +6,11 @@ market-data API (no key, no account). Standard library only, Python 3.9 or newer
 
 1. GET /fapi/v1/exchangeInfo: every perpetual quoted in USDT, whatever its status now (one
    being settled or closed is kept while Binance still lists it, so the universe is less
-   biased towards the coins that survived), into OUT/um/universe.csv.
+   biased towards the coins that survived), into OUT/um/universe.csv, with the type of
+   its underlying as Binance gives it; and every contract quoted in USDT, perpetual or not,
+   with its contract and underlying types, into OUT/um/contracts.csv (all `--list-only`
+   writes), so that the archive's contracts that are not perpetuals on coins can be told
+   from those gone from the list.
 2. GET /fapi/v1/klines, interval 1d, 1500 days a request: OUT/um/klines1d/<SYMBOL>.csv
    with open_time (ms, UTC), open, high, low, close, volume, quote_volume, trades.
 3. GET /fapi/v1/fundingRate, as scripts/fetch_funding.py does:
@@ -41,7 +45,8 @@ BASE = "https://fapi.binance.com"
 AGENT = {"User-Agent": "fetch_universe/1.0"}
 DAY = 86_400_000
 KLINE_COLUMNS = ("open_time", "open", "high", "low", "close", "volume", "quote_volume", "trades")
-UNIVERSE_COLUMNS = ("symbol", "status", "onboard_date", "base", "quote")
+UNIVERSE_COLUMNS = ("symbol", "status", "onboard_date", "base", "quote", "underlying_type")
+CONTRACT_COLUMNS = ("symbol", "contract_type", "underlying_type", "status")
 
 
 def get(url: str, tries: int, timeout: float):
@@ -66,15 +71,31 @@ def get(url: str, tries: int, timeout: float):
     raise AssertionError("unreachable")
 
 
-def universe(base: str, quote: str, tries: int, timeout: float) -> list[dict]:
-    info = get(f"{base}/fapi/v1/exchangeInfo", tries, timeout)
+def contracts(info: dict, quote: str) -> list[dict]:
+    """Every contract quoted in `quote`, whatever its type: perpetuals on coins, and the
+    others (deliveries, indices, contracts on shares or metals) by the types Binance gives."""
+    out = [{"symbol": s["symbol"], "contract_type": s.get("contractType", ""),
+            "underlying_type": s.get("underlyingType", ""), "status": s.get("status", "")}
+           for s in info.get("symbols", []) if s.get("quoteAsset") == quote]  # fmt: skip
+    return sorted(out, key=lambda x: x["symbol"])
+
+
+def universe(info: dict, quote: str) -> list[dict]:
     out = []
     for s in info.get("symbols", []):
         if s.get("contractType") == "PERPETUAL" and s.get("quoteAsset") == quote:
             out.append({"symbol": s["symbol"], "status": s.get("status", ""),
                         "onboard_date": int(s.get("onboardDate") or 0),
-                        "base": s.get("baseAsset", ""), "quote": quote})  # fmt: skip
+                        "base": s.get("baseAsset", ""), "quote": quote,
+                        "underlying_type": s.get("underlyingType", "")})  # fmt: skip
     return sorted(out, key=lambda x: x["symbol"])
+
+
+def _counts(rows: list[dict], key: str) -> str:
+    n: dict[str, int] = {}
+    for r in rows:
+        n[r[key]] = n.get(r[key], 0) + 1
+    return ", ".join(f"{k or '?'} {v}" for k, v in sorted(n.items()))
 
 
 def read_rows(path: Path, columns: tuple[str, ...]) -> list[list[str]]:
@@ -131,6 +152,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     p.add_argument("--symbols", nargs="*", help="only these (default: every perpetual)")
     p.add_argument("--no-funding", action="store_true", help="daily bars only")
+    p.add_argument("--list-only", action="store_true",
+                   help="write universe.csv and contracts.csv, download nothing else")  # fmt: skip
     p.add_argument("--tries", default=5, type=int)
     p.add_argument("--timeout", default=30.0, type=float)
     p.add_argument("--pause", default=0.3, type=float, help="seconds between bar requests")
@@ -144,20 +167,25 @@ def main(argv: list[str] | None = None) -> int:
     base = a.base_url.rstrip("/")
     lo, hi = ff.ms(a.start), ff.ms(a.end + dt.timedelta(days=1)) - 1
     try:
-        syms = universe(base, a.quote, a.tries, a.timeout)
+        info = get(f"{base}/fapi/v1/exchangeInfo", a.tries, a.timeout)
     except RuntimeError as e:
         print(f"FAILED: exchangeInfo: {e}", file=sys.stderr)
         return 1
+    syms, every = universe(info, a.quote), contracts(info, a.quote)
     if a.symbols:
         wanted = {s.upper() for s in a.symbols}
         syms = [s for s in syms if s["symbol"] in wanted]
     write_rows(a.out / "um" / "universe.csv", UNIVERSE_COLUMNS,
                [[s[c] for c in UNIVERSE_COLUMNS] for s in syms])  # fmt: skip
-    statuses: dict[str, int] = {}
-    for s in syms:
-        statuses[s["status"]] = statuses.get(s["status"], 0) + 1
-    print(f"{len(syms)} {a.quote} perpetuals: "
-          + ", ".join(f"{k or '?'} {v}" for k, v in sorted(statuses.items())))  # fmt: skip
+    write_rows(a.out / "um" / "contracts.csv", CONTRACT_COLUMNS,
+               [[s[c] for c in CONTRACT_COLUMNS] for s in every])  # fmt: skip
+    print(f"{len(syms)} {a.quote} perpetuals: {_counts(syms, 'status')}; underlying "
+          f"{_counts(syms, 'underlying_type')}")  # fmt: skip
+    other = [s for s in every if s["contract_type"] != "PERPETUAL"]
+    print(f"{len(other)} other {a.quote} contracts: {_counts(other, 'contract_type')}")
+    if a.list_only:
+        print(f"the lists -> {a.out / 'um'}")
+        return 0
     failed = []
     for n, s in enumerate(syms, 1):
         sym = s["symbol"]

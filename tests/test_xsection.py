@@ -106,6 +106,7 @@ def test_the_command(tmp_path, capsys):
     assert "25 perpetuals" in out and "mom30" in out and "carry" in out and "net_pct" in out
     assert "not coins: BLUEBIRDUSDT, BTCDOMUSDT" in out and "no daily bar" not in out
     assert "coins gone from its list are missing" in out
+    assert "um/universe.csv: every file under um/klines1d taken for a perpetual" in out
     (tmp_path / "um" / "gone.csv").write_text("symbol\n")
     assert main(["xsection", "--data", str(tmp_path), "--first", "2021-03-01",
                  "--until", "2021-12-31", "--top", "20"]) == 0  # fmt: skip
@@ -149,6 +150,86 @@ def test_contracts_that_are_not_coins_are_left_out_and_days_without_bars_counted
     k.write_text("\n".join([lines[0], *lines[21:]]) + "\n")
     p = xs.load(tmp_path, "2022-02-10", "2022-03-01")
     assert p.symbols == ["AUSDT", "BUSDT"] and p.unbarred == {"BUSDT": 20}
+
+
+def test_only_the_perpetuals_on_coins_listed_or_gone_are_in(tmp_path, capsys):
+    for sym in ("AUSDT", "BUSDT", "IDXUSDT", "GONEUSDT", "SHRUSDT"):
+        write(tmp_path, sym, "2022-01-01", np.ones(60), np.ones(60), np.zeros(60))
+    p = xs.load(tmp_path, "2022-02-10", "2022-03-01")  # no universe.csv: every file
+    assert len(p.symbols) == 5 and not p.listed
+    um = tmp_path / "um"
+    # an old universe.csv, before the underlying's type was written: every one a coin
+    (um / "universe.csv").write_text("symbol,status\nAUSDT,TRADING\nBUSDT,SETTLING\n"
+                                     "IDXUSDT,TRADING\n")  # fmt: skip
+    p = xs.load(tmp_path, "2022-02-10", "2022-03-01")
+    assert p.symbols == ["AUSDT", "BUSDT", "IDXUSDT"] and p.listed
+    assert p.unlisted == ["GONEUSDT", "SHRUSDT"]
+    (um / "universe.csv").write_text("symbol,status,underlying_type\nAUSDT,TRADING,COIN\n"
+                                     "BUSDT,SETTLING,\nIDXUSDT,TRADING,INDEX\n")  # fmt: skip
+    (um / "gone.csv").write_text("symbol,first_day\nGONEUSDT,2022-01-01\n")
+    p = xs.load(tmp_path, "2022-02-10", "2022-03-01")
+    assert p.symbols == ["AUSDT", "BUSDT", "GONEUSDT"]
+    assert p.other_type == {"IDXUSDT": "INDEX"} and p.unlisted == ["SHRUSDT"]
+    assert main(["xsection", "--data", str(tmp_path), "--first", "2022-02-10",
+                 "--until", "2022-03-01", "--top", "3"]) == 0  # fmt: skip
+    out = capsys.readouterr().out
+    assert "3 perpetuals under" in out
+    assert "left out, 1 perpetuals on an underlying Binance does not call a coin: INDEX 1" in out
+    assert "left out, 1 files of contracts neither listed as perpetuals nor gone" in out
+    assert "SHRUSDT" in out and "no " + str(tmp_path) not in out
+
+
+def test_the_funding_a_day_its_settlements_and_a_settlement_given_twice(tmp_path):
+    funding = np.full(60, 3e-4)
+    funding[45] = 0.15  # 5% at each of the day's three settlements
+    write(tmp_path, "AUSDT", "2022-01-01", np.ones(60), np.full(60, 9.0), funding)
+    loud = np.zeros(60)
+    loud[50] = -0.6  # larger, but out of the universe: the least volume
+    write(tmp_path, "BUSDT", "2022-01-01", np.ones(60), np.full(60, 1.0), loud)
+    write(tmp_path, "CUSDT", "2022-01-01", np.ones(60), np.full(60, 5.0), np.zeros(60))
+    p = xs.load(tmp_path, "2022-02-10", "2022-03-01")
+    i = p.dates.index("2022-02-15")
+    assert p.settlements[i, 0] == 3 and p.funding[i, 0] == pytest.approx(0.15)
+    big = xs.largest_funding(p, xs.universe(p, top=2), p.dates.index("2022-02-10"), n=2)
+    assert big[0] == {"symbol": "AUSDT", "date": "2022-02-15", "pct": pytest.approx(15.0),
+                      "settlements": 3}  # fmt: skip
+    assert big[1]["symbol"] == "AUSDT" and big[1]["pct"] == pytest.approx(0.03)
+    f = tmp_path / "um" / "fundingRate" / "CUSDT" / "CUSDT-fundingRate.csv"
+    lines = f.read_text().splitlines()
+    f.write_text("\n".join([*lines, lines[-1]]) + "\n")
+    with pytest.raises(ValueError, match=r"CUSDT-fundingRate\.csv: a settlement time given twice"):
+        xs.load(tmp_path, "2022-02-10", "2022-03-01")
+
+
+def test_a_portfolio_that_only_rides_the_market_has_its_beta_and_nothing_else(tmp_path):
+    # coin j's day is b_j times the market's, b_j from 0 to 2; the signal ranks the coins
+    # by b_j, so the portfolio is long the high betas and short the low ones
+    rng = np.random.default_rng(11)
+    days = 300
+    m = rng.normal(0.003, 0.03, days)
+    b = np.arange(12) / 5.5
+    for j in range(12):
+        r = b[j] * m + rng.normal(0, 0.0005, days)  # simple returns: linear in the market's
+        write(tmp_path, f"C{j:02d}USDT", "2021-01-01", 10 * np.cumprod(1 + r),
+              rng.uniform(1e6, 2e6, days), np.full(days, -b[j] * 1e-6))  # fmt: skip
+    p = xs.load(tmp_path, "2021-03-01", "2021-10-27")
+    e = xs.explain(p, "carry", 7, top=12, q=0.2, first="2021-03-01")
+    # long the 3 highest betas, short the 3 lowest, half the capital a side
+    assert e.beta == pytest.approx(0.5 * (b[9:].mean() - b[:3].mean()), abs=0.05)
+    whole = xs.evaluate(p, "carry", xs.signals(p)["carry"], 7, 12, 0.2, 9.0, "2021-03-01")
+    assert e.market_pct > 50 and whole.net_pct > 30 and abs(e.net_less_beta) < 1
+
+
+def test_a_one_day_reversal_pays_on_time_and_costs_a_day_late(tmp_path):
+    # every coin up a_j one day and down a_j the next: yesterday's losers win today
+    days = 120
+    for j in range(12):
+        close = 10 * np.exp(0.01 * (j + 1) * (-1.0) ** np.arange(days))
+        write(tmp_path, f"C{j:02d}USDT", "2021-01-01", close, np.full(days, 1e6 + j))
+    p = xs.load(tmp_path, "2021-03-01", "2021-04-30")
+    e = xs.explain(p, "rev1", 1, top=12, q=0.2, first="2021-03-01")
+    whole = xs.evaluate(p, "rev1", xs.signals(p)["rev1"], 1, 12, 0.2, 9.0, "2021-03-01")
+    assert whole.net_pct > 1000 and e.late_net < -1000 and e.late_sharpe < 0
 
 
 def test_where_the_money_came_from(tmp_path):
@@ -205,5 +286,7 @@ def test_the_command_explains(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "carry, rebalanced every 1 days" in out and "mom30, rebalanced every 7 days" in out
     assert "median_bp" in out and "contribution_pct" in out and "the net without them" in out
+    assert out.count("beta to the universe (equal weights") == 2 and "Decided a day late" in out
+    assert "the largest funding in a day, in the universe: C" in out and "(3 settlements)" in out
     assert main(["xsection", "--data", str(tmp_path), "--first", "2021-03-01", "--until",
                  "2021-10-31", "--explain", "nothing:1"]) == 2  # fmt: skip
