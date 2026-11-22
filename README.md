@@ -444,7 +444,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 197 in all, each caught.
+it is compared with and a taker filled with no latency: 202 in all, each caught.
 
 ## Numbers
 
@@ -651,13 +651,26 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 006 screen of 44 trade-only signals | screened, held out confirmed 3/3 | realized volatility over 5 and 1 min, intensity over 5 min, against the size of the next 30 s: IC 0.32 to 0.34 held out |
 | 007 trade flow against a taker's 9 bp | failed on development, held-out months not opened | best 3.1 +- 1.0 bp a trade (60 min) |
 | 008 funding carry, spot against the perpetual | passed, held out confirmed | 13.9% a year of the notional 2020 .. 2023 (16.6, 29.8, 2.1, 6.9 by year), 6.0% over January 2024 .. October 2026; holding always 6.9% |
-| 009 funding carry across coins | passed on development (deflated Sharpe 0.50, reported); held out not opened | +36.4% a year 2020 .. 2023, Sharpe from months 1.42 |
-| 010 momentum across coins, an hour after the close | written, not run yet | |
+| 009 funding carry across coins | passed on development (deflated Sharpe 0.50, reported); held out confirmed, p 0.0499, but by its rebalance day's luck (below) | +36.4% a year 2020 .. 2023, Sharpe from months 1.42; held out +46.7% (Sharpe 1.16, worst drawdown 50.5%), the other six days of the week from +4.7% to +56.3% |
+| 010 momentum across coins, an hour after the close | failed on development: PBO 0.55 over its 3 variants; its held-out period informs, decides nothing | +50.5% a year 2020 .. 2023, Sharpe from months 1.40, p after BH 0.004 |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
 taker's (007). The carry is paid after fees, but since 2022 at about the rate of US
 Treasury bills (`carry-report`), with the exchange's risk and the short leg's margin on top.
+
+009's confirmation does not hold up. Its rule rebalances every 7 days from the period's
+first day, and nothing fixed which day of the week that is; the held-out run began on a
+Monday. The same rule over the same held-out period [backtest, 2024-01-01 .. 2026-10-31],
+rebalanced on each of the other days: Tuesday +56.3% a year (p 0.020), Wednesday +34.9%
+(0.074), Thursday +26.1% (0.161), Friday +20.5% (0.252), Saturday +6.8% (0.404), Sunday
++4.7% (0.434); rebalanced daily, which no weekday decides, +31.2% (0.145). Two days of seven
+clear 5%, and the mean of the seven is +28% a year at a Sharpe ratio near 0.7 with
+drawdowns near half the capital: carry across coins earned something out of sample, but
+not distinguishably from noise over 34 months, and its verdict was set by the day it
+happened to start on. The verdict stays as recorded; the lesson goes into the next
+hypothesis: a rule held for several days is run as that many staggered portfolios, one
+rebalanced each day, so that no start day decides it.
 
 Erratum: the comment in `experiments/007-flow-beats-cost.yaml` calls the days of
 Tardis.dev's recording futures days. They are Binance spot BTCUSDT. The hypothesis is left
@@ -763,6 +776,11 @@ held to the same hour after its next rebalance, the funding settled from that ho
 net a year, Sharpe from months, and the share of its positions with an hour bar at both
 ends of the day. No hour bar after 2023-12-31 is read: a month's file after it is not
 opened, and the last development day, whose trading hour falls in 2024, returns nothing.
+
+`--staggered` runs a rule held for N days as N portfolios with an N-th of the capital
+each, started on N consecutive days, so that one is rebalanced every day: once all are in,
+it holds the same coins whatever day it started on (each trades on its own, so the costs
+are an upper bound). A rule of a hypothesis takes `staggered: true` for the same.
 `tests/test_xsection.py` works the universe, the portfolio, its costs and its funding out
 by hand, finds a planted momentum and nothing where there is none, shows the held-out
 years are neither asked for nor read, and that the breakdown adds up to the net and finds

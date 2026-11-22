@@ -46,12 +46,14 @@ class Rule:
     top: int  # the universe's size
     q: float  # the share of the universe a side
     hours: int = 0  # traded this long after the daily close, from hourly bars
+    staggered: bool = False  # held `hold` days as `hold` portfolios, one rebalanced a day
 
     @property
     def name(self) -> str:
         late = f", traded {self.hours} h after the close" if self.hours else ""
+        tranches = f", as {self.hold} staggered portfolios" if self.staggered else ""
         return (f"{self.signal}, every {self.hold} days, top {self.top}, {self.q:.0%} a side"
-                + late)  # fmt: skip
+                + tranches + late)  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -115,8 +117,11 @@ def load_spec(path: str | Path) -> Spec:
                 return default
             return ex._get(d, key, "rule")
 
+        stag = get("staggered", False)
+        if not isinstance(stag, bool):
+            raise ex.ExperimentError(f"{path}: staggered is true or false, not {stag!r}")
         r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
-                 int(get("hours", 0)))  # fmt: skip
+                 int(get("hours", 0)), stag and int(get("hold")) > 1)  # fmt: skip
         if r.signal not in xs.SIGNALS:
             raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of {xs.SIGNALS}")
         if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
@@ -193,9 +198,9 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
             cache[key] = xs.lagged(p, root, [rule.hours], held_out)[rule.hours].r
     inu, r, x = cache[rule.top], cache[key], cache["x"][rule.signal]
     start = p.dates.index(first)
-    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp)
-    gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0)
-    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q)
+    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered)
+    gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered)
+    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)
     on = held[start:] != 0
     mkt = xs.market(inu, r, start)
     return Days(p.dates[start:], pnl[start:], gross[start:], mkt[start:],

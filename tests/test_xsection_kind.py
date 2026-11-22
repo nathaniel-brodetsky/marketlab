@@ -239,3 +239,21 @@ def test_the_committed_momentum_hypothesis_loads():
     assert len(spec.trials) == 7 and all(t.hours == 1 for t in spec.trials)
     assert (spec.holdout_first, spec.holdout_last) == ("2024-01-01", "2026-10-31")
     assert spec.min_dsr is None and spec.min_positive_years == 2
+
+
+def test_a_staggered_rule():
+    text = SPEC.replace("q: 0.2}", "q: 0.2, staggered: true}")
+    import tempfile
+
+    d = Path(tempfile.mkdtemp())
+    spec = xk.load_spec(spec_file(d, text))
+    assert spec.primary.staggered and spec.primary.name.endswith("as 7 staggered portfolios")
+    assert not spec.variants[1].staggered  # held a day: one portfolio
+    with pytest.raises(ex.ExperimentError, match="staggered is true or false"):
+        xk.load_spec(spec_file(d, text.replace("staggered: true", "staggered: 1")))
+    planted(d / "paid", True, seed=1)
+    r = xk.run(spec, d / "paid", d / "results", prov=PROV)
+    plain = xk.run(xk.load_spec(spec_file(d, SPEC, "032-plain.yaml")), d / "paid",
+                   d / "results-plain", prov=PROV)  # fmt: skip
+    assert r.table[0]["annual_pct"] != plain.table[0]["annual_pct"]
+    assert r.table[1] == plain.table[1]  # the daily variant is the same

@@ -1046,8 +1046,8 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "    late, _, _ = portfolio(_lag(x, 1), inu_late, r, start, hold, q, cost_bp)",
-        "    late, _, _ = portfolio(x, inu_late, r, start, hold, q, cost_bp)",
+        "    late, _, _ = portfolio(_lag(x, 1), inu_late, r, start, hold, q, cost_bp, staggered)",
+        "    late, _, _ = portfolio(x, inu_late, r, start, hold, q, cost_bp, staggered)",
         "decided a day late on the day's own signal",
     ),
     (
@@ -1118,8 +1118,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp)",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0)",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered)",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered)",
         "the hypothesis trades for free",
     ),
     (
@@ -1160,8 +1160,8 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "            pnl, _, _ = portfolio(x[name], inu, lag[L].r, start, hold, q, cost_bp)",
-        "            pnl, _, _ = portfolio(x[name], inu, daily_returns(p), start, hold, q, cost_bp)",
+        "            pnl, _, _ = portfolio(x[name], inu, lag[L].r, start, hold, q, cost_bp, staggered)",
+        "            pnl, _, _ = portfolio(x[name], inu, daily_returns(p), start, hold, q, cost_bp, staggered)",
         "the hours after the close priced at the close",
     ),
     (
@@ -1193,6 +1193,36 @@ M = [
         "        lag = xs.lagged(p, root, [h], held_out=True)[h]",
         "        lag = xs.lagged(p, root, [h])[h]",
         "the held-out run refused its own hour bars",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        parts = [holdings(x, inu, start + k, hold, q) for k in range(hold)]",
+        "        parts = [holdings(x, inu, start, hold, q) for k in range(hold)]",
+        "the staggered portfolios all started the same day",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        held = sum(h for h, _, _, _ in parts) / hold",
+        "        held = sum(h for h, _, _, _ in parts)",
+        "each staggered portfolio with all the capital",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        traded = sum(t for _, t, _, _ in parts) / hold",
+        "        traded = sum(t for _, t, _, _ in parts)",
+        "the staggered portfolios' trades counted whole",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered)",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp)",
+        "a staggered hypothesis run as one portfolio",
+    ),
+    (
+        "marketlab/cli.py",
+        "                               a.staggered)  # fmt: skip",
+        "                               False)  # fmt: skip",
+        "the command's --staggered ignored",
     ),
 ]
 survived = []

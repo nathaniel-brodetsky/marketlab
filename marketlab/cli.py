@@ -407,7 +407,8 @@ def cmd_xsection(a: argparse.Namespace) -> int:
     from . import xsection as xs
 
     try:
-        p, results = xs.report(a.data, a.first, a.until, a.top, a.q, a.cost, tuple(a.holds))
+        p, results = xs.report(a.data, a.first, a.until, a.top, a.q, a.cost, tuple(a.holds),
+                               a.staggered)  # fmt: skip
     except xs.HeldOut as e:
         raise ContractError(str(e)) from None
     if not p.symbols:
@@ -417,6 +418,11 @@ def cmd_xsection(a: argparse.Namespace) -> int:
         f"{a.top} with the most quote volume over 30 days; long the top {a.q:.0%} by the "
         f"signal, short the bottom {a.q:.0%}; a round trip {a.cost:g} bp; funding in the P&L; "
         f"left out, not coins: {', '.join(sorted(xs.NOT_COINS))}"
+        + (
+            "; a rule held N days runs as N staggered portfolios, one rebalanced each day"
+            if a.staggered
+            else ""
+        )
     )
     if not p.listed:
         print(f"no {a.data}/um/universe.csv: every file under um/klines1d taken for a perpetual "
@@ -494,7 +500,8 @@ def cmd_xsection(a: argparse.Namespace) -> int:
             rules.append((name, int(hold)))
         if any(not 0 <= h < 24 for h in a.hours):
             raise ContractError("--hours: from 0 to 23 after the daily close")
-        rows = xs.at_hours(p, a.data, rules, sorted(set(a.hours)), a.top, a.q, a.cost, a.first)
+        rows = xs.at_hours(p, a.data, rules, sorted(set(a.hours)), a.top, a.q, a.cost, a.first,
+                           a.staggered)  # fmt: skip
         t = pl.DataFrame(rows).pivot(on="hours", index="rule", values="net_pct")
         with _wide():
             print("\nnet, % a year, traded H hours after the daily close (columns: H):")
@@ -515,7 +522,7 @@ def cmd_xsection(a: argparse.Namespace) -> int:
         name, _, hold = item.partition(":")
         if name not in xs.SIGNALS or not hold.isdigit() or int(hold) < 1:
             raise ContractError(f"--explain {item}: SIGNAL:HOLD, a signal of {xs.SIGNALS}")
-        e = xs.explain(p, name, int(hold), a.top, a.q, a.cost, a.first)
+        e = xs.explain(p, name, int(hold), a.top, a.q, a.cost, a.first, staggered=a.staggered)
         g = e.legs
         print(
             f"\n{name}, rebalanced every {hold} days, % a year: long {g['long_price']:+.1f} "
@@ -1313,6 +1320,8 @@ def parser() -> argparse.ArgumentParser:
                      default=["mom7:1", "carry:7", "carry:1"])  # fmt: skip
     xs_.add_argument("--list-universe", metavar="FILE",
                      help="write every perpetual ever in the universe, one a line")  # fmt: skip
+    xs_.add_argument("--staggered", action="store_true",
+                     help="a rule held N days as N portfolios, one rebalanced a day")  # fmt: skip
     xs_.add_argument("--list-coins", metavar="FILE",
                      help="write every perpetual on a coin under --data, one a line")  # fmt: skip
     xs_.set_defaults(run=cmd_xsection)

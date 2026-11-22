@@ -254,7 +254,7 @@ def lagged(p: Panel, root: str | Path, hours: list[int],
 
 def at_hours(p: Panel, root: str | Path, rules: list[tuple[str, int]], hours: list[int],
              top: int = 50, q: float = 0.2, cost_bp: float = 9.0,
-             first: str = "2020-01-01") -> list[dict]:  # fmt: skip
+             first: str = "2020-01-01", staggered: bool = False) -> list[dict]:  # fmt: skip
     """Each rule (signal, hold) decided at the daily close as ever, traded `hours` later:
     its net a year, Sharpe from months, and the share of its positions with an hour bar to
     trade at (a position without one returns nothing that day)."""
@@ -265,9 +265,9 @@ def at_hours(p: Panel, root: str | Path, rules: list[tuple[str, int]], hours: li
     lag = lagged(p, root, hours)
     out = []
     for name, hold in rules:
-        held, _, _, _ = holdings(x[name], inu, start, hold, q)
+        held, _, _, _ = holdings(x[name], inu, start, hold, q, staggered)
         for L in hours:
-            pnl, _, _ = portfolio(x[name], inu, lag[L].r, start, hold, q, cost_bp)
+            pnl, _, _ = portfolio(x[name], inu, lag[L].r, start, hold, q, cost_bp, staggered)
             net = pnl[start:]
             sums = np.array([net[month == mo].sum() for mo in dict.fromkeys(month)])
             on = held != 0
@@ -354,10 +354,26 @@ def forward(r: np.ndarray, hold: int) -> np.ndarray:
     return out
 
 
-def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int,
-             q: float) -> tuple[np.ndarray, np.ndarray, list[float], list[int]]:  # fmt: skip
+Held = tuple[np.ndarray, np.ndarray, list[float], list[int]]
+
+
+def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
+             staggered: bool = False) -> Held:  # fmt: skip
     """The weights held over each day (decided at the close of the day before), the weight
-    traded each day, the weight traded at each rebalance, and the positions a side."""
+    traded each day, the weight traded at each rebalance, and the positions a side.
+
+    `staggered`: `hold` portfolios with a `hold`-th of the capital each, the k-th started `k`
+    days after `start`, so that one is rebalanced every day and no start day decides the
+    result (a weekly rule started on a Monday or a Sunday holds the same coins once all
+    seven are in). Each trades on its own: what two of them trade in one coin the same day is
+    not netted, so the costs are an upper bound."""
+    if staggered and hold > 1:
+        parts = [holdings(x, inu, start + k, hold, q) for k in range(hold)]
+        held = sum(h for h, _, _, _ in parts) / hold
+        traded = sum(t for _, t, _, _ in parts) / hold
+        turns = [u / hold for _, _, us, _ in parts for u in us]
+        names = [n for _, _, _, ns in parts for n in ns]
+        return held, traded, turns, names
     n_days, n_sym = x.shape
     w = np.zeros(n_sym)
     held = np.zeros((n_days, n_sym))
@@ -384,10 +400,11 @@ def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int,
 
 
 def portfolio(x: np.ndarray, inu: np.ndarray, r: np.ndarray, start: int, hold: int, q: float,
-              cost_bp: float) -> tuple[np.ndarray, list[float], list[int]]:  # fmt: skip
+              cost_bp: float,
+              staggered: bool = False) -> tuple[np.ndarray, list[float], list[int]]:  # fmt: skip
     """The long-short portfolio's return each day (costs on the day of the rebalance), the
     weight traded at each rebalance, and the positions a side."""
-    held, traded, turns, names = holdings(x, inu, start, hold, q)
+    held, traded, turns, names = holdings(x, inu, start, hold, q, staggered)
     pnl = (held * np.nan_to_num(r)).sum(axis=1) - traded * cost_bp / 2 / 1e4
     return pnl, turns, names
 
@@ -423,6 +440,7 @@ def evaluate(
     first: str,
     r: np.ndarray | None = None,
     inu: np.ndarray | None = None,
+    staggered: bool = False,
 ) -> Result:  # fmt: skip
     r = daily_returns(p) if r is None else r
     inu = universe(p, top) if inu is None else inu
@@ -431,7 +449,7 @@ def evaluate(
     ic_days = daily_ic(x, fwd, inu, start, hold)[1]
     ic = float(ic_days.mean()) if len(ic_days) else float("nan")
     se = metrics.newey_west_se(ic_days, hold) if len(ic_days) > 2 else float("nan")
-    pnl, turns, names = portfolio(x, inu, r, start, hold, q, cost_bp)
+    pnl, turns, names = portfolio(x, inu, r, start, hold, q, cost_bp, staggered)
     days = p.dates[start:]
     net = pnl[start:]
     month = np.array([d[:7] for d in days])
@@ -465,6 +483,7 @@ def report(
     q: float = 0.2,
     cost_bp: float = 9.0,
     holds: tuple[int, ...] = (1, 7),
+    staggered: bool = False,
 ) -> tuple[Panel, list[Result]]:
     p = load(root, first, last)
     sig = signals(p)
@@ -474,7 +493,8 @@ def report(
         for h in holds:
             if name == "rev1" and h != 1:
                 continue
-            out.append(evaluate(p, name, sig[name], h, top, q, cost_bp, first, r, inu))
+            out.append(evaluate(p, name, sig[name], h, top, q, cost_bp, first, r, inu,
+                                staggered))  # fmt: skip
     return p, out
 
 
@@ -522,6 +542,7 @@ def explain(
     cost_bp: float = 9.0,
     first: str = "2020-01-01",
     n_days: int = 10,
+    staggered: bool = False,
 ) -> Explained:  # fmt: skip
     """Breaks one portfolio's P&L down by year, by leg, into price and funding, and by coin
     and day; and the next day's return by fifth of the signal, mean and median, which shows
@@ -532,7 +553,7 @@ def explain(
     x = signals(p)[name]
     r, inu = daily_returns(p), universe(p, top)
     start = p.dates.index(first) if first in p.dates else 0
-    held, traded, _, _ = holdings(x, inu, start, hold, q)
+    held, traded, _, _ = holdings(x, inu, start, hold, q, staggered)
     price = np.nan_to_num(p.close / _lag(p.close, 1) - 1)
     fund = np.nan_to_num(p.funding)
     c_price, c_fund = held * price, -held * fund
@@ -601,7 +622,7 @@ def explain(
     # decided a day late: the signal and the universe of the day before
     inu_late = np.zeros_like(inu)
     inu_late[1:] = inu[:-1]
-    late, _, _ = portfolio(_lag(x, 1), inu_late, r, start, hold, q, cost_bp)
+    late, _, _ = portfolio(_lag(x, 1), inu_late, r, start, hold, q, cost_bp, staggered)
     month = np.array([d[:7] for d in p.dates[start:]])
     late_months = np.array([late[start:][month == mo].sum() for mo in dict.fromkeys(month)])
     return Explained(

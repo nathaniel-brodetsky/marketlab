@@ -398,3 +398,39 @@ def test_the_command_trades_hours_after_the_close(tmp_path, capsys):
     assert out_file.read_text().split() == [f"C{j:02d}USDT" for j in range(12)]
     assert main([*args, "--hours", "24"]) == 2
     assert main([*args, "--hours", "1", "--hour-rules", "rev2:1"]) == 2
+
+
+def test_staggered_portfolios_are_one_a_day_and_no_start_day_decides():
+    rng = np.random.default_rng(3)
+    x = rng.normal(size=(80, 15))
+    inu = np.ones_like(x, dtype=bool)
+    plain = [xs.holdings(x, inu, 10 + k, 7, 0.2) for k in range(7)]
+    held, traded, turns, names = xs.holdings(x, inu, 10, 7, 0.2, staggered=True)
+    assert np.allclose(held, sum(h for h, _, _, _ in plain) / 7)  # a seventh each
+    assert np.allclose(traded, sum(t for _, t, _, _ in plain) / 7)
+    assert sum(turns) == pytest.approx(traded.sum()) and names and max(names) <= 3
+    gross = np.abs(held[17:]).sum(axis=1)  # all seven in from day 17; a coin one holds long
+    assert (gross > 0.2).all() and (gross <= 1 + 1e-9).all()  # and another short nets out
+    # started on another day of the week: the same coins once all seven are in
+    for k in range(1, 7):
+        other, _, _, _ = xs.holdings(x, inu, 10 + k, 7, 0.2, staggered=True)
+        assert np.allclose(other[10 + k + 7 :], held[10 + k + 7 :])
+        once, _, _, _ = xs.holdings(x, inu, 10 + k, 7, 0.2)
+        assert not np.allclose(once[17 + k :], plain[0][0][17 + k :])  # one portfolio: not so
+    one, _, _, _ = xs.holdings(x, inu, 10, 1, 0.2, staggered=True)
+    assert np.array_equal(one, xs.holdings(x, inu, 10, 1, 0.2)[0])
+
+
+def test_the_command_runs_staggered(tmp_path, capsys):
+    planted(tmp_path, 0.01, seed=3, n_sym=25, days=400)
+    args = ["xsection", "--data", str(tmp_path), "--first", "2021-03-01", "--until",
+            "2021-12-31", "--top", "20"]  # fmt: skip
+    assert main(args) == 0
+    plain = capsys.readouterr().out
+    assert main([*args, "--staggered"]) == 0
+    out = capsys.readouterr().out
+    assert "N staggered portfolios, one rebalanced each day" in out
+    row = [x for x in out.splitlines() if "│ mom30" in x and "┆ 7 " in x]
+    assert row and row[0] not in plain  # the weekly rows change
+    same = [x for x in out.splitlines() if "│ rev1" in x]
+    assert same and same[0] in plain  # the daily ones do not
