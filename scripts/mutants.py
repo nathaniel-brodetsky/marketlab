@@ -902,7 +902,7 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "    if last > DEV_END:",
+        "    if last > DEV_END and not held_out:",
         "    if False:",
         "the cross-section reads the held-out years",
     ),
@@ -1073,6 +1073,60 @@ M = [
         "            elif newest and last >= newest:",
         "            elif False:",
         "a perpetual still trading taken for one gone",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    if out.exists():",
+        "    if False:",
+        "the cross-section's held-out period opened twice",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    p = xs.load(root, spec.first, spec.last)",
+        "    p = xs.load(root, spec.first, spec.holdout_last, held_out=True)",
+        "the cross-section's development run reads the held-out days",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    if last > DEV_END and not held_out:",
+        "    if last > DEV_END:",
+        "the held-out run refused its own days",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    if up < spec.min_positive_years:",
+        "    if False:",
+        "the held-out years up not asked for",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    if not abs(beta) <= spec.max_abs_beta:",
+        "    if False:",
+        "the held-out beta not asked for",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    dsr = deflated(runs[spec.primary], [runs[r] for r in spec.trials])",
+        "    dsr = deflated(runs[spec.primary], [runs[spec.primary]])",
+        "the deflated Sharpe ratio blind to the trials",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        "p": ex._f(stats.norm.sf(mean / se)) if se > 0 else None,',
+        '        "p": ex._f(stats.norm.cdf(mean / se)) if se > 0 else None,',
+        "the cross-section's p for a mean below zero",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp)",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0)",
+        "the hypothesis trades for free",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    if spec.min_dsr is not None and not dsr >= spec.min_dsr:",
+        "    if False:",
+        "the deflated Sharpe ratio's bar not asked for",
     ),
 ]
 survived = []

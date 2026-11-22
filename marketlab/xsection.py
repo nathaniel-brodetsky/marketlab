@@ -106,10 +106,11 @@ def perpetuals(root: str | Path) -> tuple[set[str] | None, dict[str, str]]:
     return keep, other
 
 
-def load(root: str | Path, first: str, last: str) -> Panel:
+def load(root: str | Path, first: str, last: str, held_out: bool = False) -> Panel:
     """Every perpetual's daily bars and funding up to `last`; the days from `first` on,
-    with 40 days before it for the signals. `last` after `DEV_END` is refused."""
-    if last > DEV_END:
+    with 40 days before it for the signals. `last` after `DEV_END` is refused, unless
+    `held_out`: only a hypothesis's held-out run (`xsection_kind.final`) asks for that."""
+    if last > DEV_END and not held_out:
         raise HeldOut(f"{last} is after {DEV_END}: the years after it are held out")
     d0 = (dt.date.fromisoformat(first) - dt.date(1970, 1, 1)).days - 40
     d1 = (dt.date.fromisoformat(last) - dt.date(1970, 1, 1)).days
@@ -366,6 +367,22 @@ def report(
     return p, out
 
 
+def market(inu: np.ndarray, r: np.ndarray, start: int) -> np.ndarray:
+    """The universe's return each day, equal weights: those in it at the day before's
+    close, as a portfolio decided then holds them; nothing before `start + 1`."""
+    mkt = np.zeros(len(r))
+    for i in range(start + 1, len(r)):
+        m = inu[i - 1] & np.isfinite(r[i])
+        if m.any():
+            mkt[i] = r[i, m].mean()
+    return mkt
+
+
+def slope(y: np.ndarray, x: np.ndarray) -> float:
+    """The least-squares slope of `y` on `x`: a beta."""
+    return float(np.cov(y, x)[0, 1] / x.var(ddof=1)) if len(x) > 1 and x.var() > 0 else float("nan")
+
+
 @dataclass
 class Explained:
     """Where a portfolio's money came from, all in % a year of the capital unless said."""
@@ -467,13 +484,9 @@ def explain(
     best = flat[order[::-1][:n_days]].sum()
     # the market a day: the universe the portfolio was decided in, equal weights, over the
     # day the portfolio is held
-    mkt = np.zeros(len(p.dates))
-    for i in range(start + 1, len(p.dates)):
-        m = inu[i - 1] & np.isfinite(r[i])
-        if m.any():
-            mkt[i] = r[i, m].mean()
+    mkt = market(inu, r, start)
     g, mk = contrib.sum(axis=1)[start + 1 :], mkt[start + 1 :]
-    beta = float(np.cov(g, mk)[0, 1] / mk.var(ddof=1)) if mk.var() > 0 else float("nan")
+    beta = slope(g, mk)
     # decided a day late: the signal and the universe of the day before
     inu_late = np.zeros_like(inu)
     inu_late[1:] = inu[:-1]

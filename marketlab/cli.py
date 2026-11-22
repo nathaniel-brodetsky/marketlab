@@ -254,7 +254,7 @@ def print_report(r) -> None:
 
 def kind_of(spec_path: Path) -> str:
     """A hypothesis's kind: `forecast` (the default), `maker`, `volatility`, `tradeflow`,
-    `screen`, `edge` or `carry`."""
+    `screen`, `edge`, `carry` or `xsection`."""
     import yaml
 
     raw = yaml.safe_load(spec_path.read_text())
@@ -322,6 +322,39 @@ def print_carry_report(r) -> None:
     print(f"primary     {s.primary.name} (first row); mean_bp a day, net of costs")
     if r.pbo:
         print(f"pbo         {r.pbo.pbo:.2f} over the {len(s.variants)} rules, by month")
+    print(f"p (BH)      {r.p_bh:.3g} over every hypothesis written")
+    print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
+
+
+def print_xsection_report(r) -> None:
+    p = r.provenance
+    code = p.head[:12] + (", with uncommitted changes" if p.dirty else "")
+    s = r.spec
+    print(f"experiment  {s.slug}: spec from commit {p.spec_commit[:12]}, code {code}")
+    print(
+        f"period      {s.first} .. {s.last}: {r.perpetuals} perpetuals on coins; held out: "
+        f"{s.holdout_first} .. {s.holdout_last}"
+    )
+    if r.verdict == "insufficient data":
+        print(f"verdict     {r.verdict}: {'; '.join(r.reasons)}")
+        return
+    cols = ["rule", "mean_bp", "annual_pct", "sharpe_months", "max_drawdown_pct",
+            "positive_months", "beta", "names_side", "p"]  # fmt: skip
+    with _wide():
+        print(pl.DataFrame([{k: x[k] for k in cols} for x in r.table]).with_columns(
+            pl.col(pl.Float64).round(3)))  # fmt: skip
+    years = r.table[0]["by_year_pct"]
+    print(f"primary     {s.primary.name} (first row); mean_bp a day of the capital, net of "
+          f"{s.round_trip_bp:g} bp a round trip; by year, %: "
+          + ", ".join(f"{y} {v:+.1f}" for y, v in years.items()))  # fmt: skip
+    print("trials      " + ", ".join(
+        f"{t['rule'].split(',')[0]} {t['rule'].split(',')[1].strip()}: "
+        + (f"{t['sharpe_months']:.2f}" if t["sharpe_months"] is not None else "-")
+        for t in r.trials))  # fmt: skip
+    print(f"dsr         {r.dsr:.2f}: the primary's deflated Sharpe ratio against the "
+          f"{len(s.trials)} trials")  # fmt: skip
+    if r.pbo:
+        print(f"pbo         {r.pbo.pbo:.2f} over the {len(s.variants)} variants, by month")
     print(f"p (BH)      {r.p_bh:.3g} over every hypothesis written")
     print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
 
@@ -851,6 +884,30 @@ def cmd_experiment_run(a: argparse.Namespace) -> int:
             return 0
         report = tradeflow.run(spec, a.data, results, cache, workers=a.workers)
         print_tradeflow_report(report)
+        print(f"written     {results / (spec.slug + '.json')}")
+        return 0
+    if kind == "xsection":
+        from . import xsection_kind as xk
+
+        spec = xk.load_spec(spec_path)
+        results = _repo_dir(spec_path, "results", a.results)
+        if a.final:
+            rec = xk.final(spec, a.data, results)
+            x = rec["summary"]
+            first, last = rec["period"]
+            print(f"held out    {first} .. {last}: opened once, now recorded")
+            print(
+                f"            {rec['rule']}: {x['mean_bp']:.3f} +- {x['se']:.3f} bp a day, "
+                f"{x['annual_pct']:.2f}% a year, Sharpe {x['sharpe_months']:.2f} from months, max "
+                f"drawdown {x['max_drawdown_pct']:.1f}%, beta {x['beta']:.2f}, p {x['p']:.3g}"
+            )
+            print("            by year, %: " + ", ".join(
+                f"{y} {v:+.1f}" for y, v in x["by_year_pct"].items()))  # fmt: skip
+            print("            " + ("confirmed" if rec["confirmed"] else
+                                    "not confirmed: " + "; ".join(rec["reasons"])))  # fmt: skip
+            return 0
+        report = xk.run(spec, a.data, results)
+        print_xsection_report(report)
         print(f"written     {results / (spec.slug + '.json')}")
         return 0
     if kind == "maker":

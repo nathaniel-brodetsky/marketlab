@@ -1,0 +1,68 @@
+# Written before any run of this hypothesis, and after the rough look (`marketlab xsection`,
+# patches 0024 .. 0028) on the same development years. The development run is therefore not
+# out of sample: these numbers were seen first [backtest, 2020-01-01 .. 2023-12-31, the 678
+# perpetuals on coins, those gone from Binance's list included]: this rule +36.4% a year
+# net of 9 bp a round trip, Sharpe from months 1.42, up every year (+28, +80, +20, +17%),
+# +20.2% without its ten best coin-days, beta to the universe 0.00, +33.4% decided a day
+# late; rebalanced daily +46.3% (Sharpe 1.51). Seven rules were looked at (the trials
+# below). What is tested is the held-out period, opened once, for the primary only.
+#
+# The held-out bars and funding (2024-01-01 .. 2026-10-31) are on disk, downloaded with the
+# rest, but no price or rate after 2023-12-31 has gone into any cross-sectional computation:
+# `xsection.load` refuses a day after it unless this hypothesis's `--final` asks. The
+# downloads printed listing dates and counts only. One coin's held-out period is known:
+# 008's held-out run read BTCUSDT's funding and hourly prices over 2024-01 .. 2026-10 (its
+# carry, spot against the perpetual, 6.0% a year of the notional), one of the fifty here.
+#
+# The carry is not new (BIS Working Paper 1087, "Crypto carry", 2023; 008 tested it on BTC
+# alone, spot against the perpetual). Here it is the cross-section: long the coins whose
+# shorts pay, short those whose longs pay, both legs perpetuals.
+id: "009"
+name: xsection-carry
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, long those whose mean funding a day over the last 7 days is lowest (strictly
+  in the bottom 20%), short those whose is highest (strictly in the top 20%), half the
+  capital a side in equal weights, rebalanced every 7 days at the daily close, paying 9 bp a
+  round trip on every unit traded and the funding as settled: its daily net is above zero
+  over 2024-01-01 .. 2026-10-31.
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2024-01-01, to: 2026-10-31}   # opened once, for the primary only
+
+rule:                     # the primary, chosen on the rough look: steadier by year than daily
+  signal: carry           # minus the mean of the daily funding sums over the last 7 days
+  hold: 7                 # days between rebalances
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # a side
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 1}
+
+trials:                   # every rule the rough look reported, for the deflated Sharpe ratio
+  - {hold: 1}
+  - {signal: mom7, hold: 1}
+  - {signal: mom7, hold: 7}
+  - {signal: mom30, hold: 1}
+  - {signal: mom30, hold: 7}
+  - {signal: rev1, hold: 1}
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20, as for 008).
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 7 trials is reported, not a bar: the rule was
+  # chosen among them on these very days, which therefore cannot test it fairly; the
+  # held-out period is that test
+  min_positive_years: 2   # of 2024, 2025, 2026 (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)

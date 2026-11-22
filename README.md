@@ -48,7 +48,7 @@ longest     237.0 s from 10:06:03 UTC
 | `marketlab features DIR [--train DIR ...] [--out FILE]` | every feature on the day, summarized; fitted features need training days |
 | `marketlab execution DIR [--every 10s] [--size 0.001] [--cancel-after 10s] [--latency 300ms] [--aggressive]` | probe orders through the fill simulator in each queue mode: what became of them, fill rate, wait, markouts |
 | `marketlab strategy --data ROOT [--offsets 0 1 2] [--signal 1s] [--threshold 1] [--vol-window 1m] [--vol-quantiles none 0.8] [--life 10s] [--max-position 5] [--modes ...] [--fees ...] [--by-day] [--workers N] [--out FILE]` | a market-making rule quoting both sides through the fill simulator, day by day: P&L before fees, what the fills captured against the mid and what the position lost, the maker fee at which it breaks even, net P&L at given fees |
-| `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (a forecast, a `maker` rule or a `volatility` forecast) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
+| `marketlab experiment run SPEC --data ROOT [--workers N] [--final]` | run a committed hypothesis (of any kind below) through the protocol and write its result to `results/`; `--final` opens the held-out days, once |
 | `marketlab experiment list` | every hypothesis, run or only written, with its verdict and its p-value adjusted for all of them as they stand |
 | `marketlab archive check [ROOT]` | integrity of Binance trade archives downloaded with `scripts/fetch_binance.py`: missing ids and trades, times, gaps between days |
 | `marketlab synth ROOT` | write a synthetic day to try the commands |
@@ -444,7 +444,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 177 in all, each caught.
+it is compared with and a taker filled with no latency: 186 in all, each caught.
 
 ## Numbers
 
@@ -608,6 +608,26 @@ out by hand, holds a year while the price triples, shows no decision changes wit
 comes after it, finds a planted carry and none where the rate averages nil, opens the
 held-out period once, and works the report's capital, bills, highs and rises out by hand.
 
+### Funding carry across coins: `kind: xsection`
+
+`experiments/009-xsection-carry.yaml` writes down the rule the rough look below (`marketlab
+xsection`) found steadiest, before its held-out years are read: each UTC day the 50
+perpetuals on coins with the most quote volume over 30 days, long those whose funding over
+the last 7 days was lowest (strictly the bottom 20%), short the highest, half the capital a
+side, rebalanced every 7 days at the daily close, 9 bp a round trip, the funding in the P&L.
+The daily net, in bp of the capital, is tested for a mean above zero with Newey-West
+errors; Benjamini-Hochberg over every hypothesis written, PBO against the daily rebalance,
+months up, and the deflated Sharpe ratio against the seven rules the rough look reported
+(reported, not a bar: the rule was chosen among them on these days, so they cannot test it
+fairly). The development years were looked at first, so the test is the held-out period,
+January 2024 .. October 2026, opened once with `--final`: confirmed if its mean is above
+zero at 5% one-sided, it was up in at least two of its three years, and its beta to the
+universe (equal weights) is within 0.3. Nothing but that run reads a day after 2023-12-31.
+`tests/test_xsection_kind.py` passes a planted carry and confirms it once, fails one where
+the funding does not last, shows the development run unchanged when the held-out prices
+are, makes the same Sharpe ratio worth less against trials that differ more, and runs it
+all through the command.
+
 ## What has been found
 
 Backtests on public data; each verdict as the protocol recorded it in `results/`.
@@ -622,6 +642,7 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 006 screen of 44 trade-only signals | screened, held out confirmed 3/3 | realized volatility over 5 and 1 min, intensity over 5 min, against the size of the next 30 s: IC 0.32 to 0.34 held out |
 | 007 trade flow against a taker's 9 bp | failed on development, held-out months not opened | best 3.1 +- 1.0 bp a trade (60 min) |
 | 008 funding carry, spot against the perpetual | passed, held out confirmed | 13.9% a year of the notional 2020 .. 2023 (16.6, 29.8, 2.1, 6.9 by year), 6.0% over January 2024 .. October 2026; holding always 6.9% |
+| 009 funding carry across coins | written, not run yet | |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
