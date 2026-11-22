@@ -257,3 +257,15 @@ def test_a_staggered_rule():
                    d / "results-plain", prov=PROV)  # fmt: skip
     assert r.table[0]["annual_pct"] != plain.table[0]["annual_pct"]
     assert r.table[1] == plain.table[1]  # the daily variant is the same
+
+
+def test_the_committed_forward_carry_loads():
+    root = Path(__file__).resolve().parents[1] / "experiments"
+    spec = xk.load_spec(root / "011-xsection-carry-forward.yaml")
+    assert spec.primary == xk.Rule("carry", 7, 50, 0.2, 1, True)
+    assert spec.primary.name == ("carry, every 7 days, top 50, 20% a side, as 7 staggered "
+                                 "portfolios, traded 1 h after the close")  # fmt: skip
+    assert [(v.hold, v.staggered) for v in spec.variants] == [(7, True), (1, False)]
+    assert len(spec.trials) == 7 and all(t.hours == 1 for t in spec.trials)
+    assert (spec.holdout_first, spec.holdout_last) == ("2026-12-01", "2028-11-30")
+    assert spec.min_dsr is None and spec.min_positive_years == 2

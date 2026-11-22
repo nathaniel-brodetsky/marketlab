@@ -1,0 +1,75 @@
+# Written on 2026-11-22, before any of its held-out days exist: they are the two years from
+# 2026-12-01, tested forward. Everything up to 2026-10-31 has been seen [backtest, the 678
+# perpetuals on coins, those gone from Binance's list included, 9 bp a round trip]:
+#
+# - 009 (this carry, held 7 days as one portfolio, traded at the close): development
+#   2020 .. 2023 +36.4% a year, Sharpe from months 1.42; held out 2024-01-01 .. 2026-10-31
+#   confirmed at p 0.0499, +46.7% a year, Sharpe 1.16, worst drawdown 50.5%; but rebalanced
+#   on the other days of the week +4.7 .. +56.3% (p 0.020 .. 0.434): its verdict was set by
+#   the day it began on.
+# - Held as seven staggered portfolios, one rebalanced each day, which no start day decides:
+#   development +31.7% a year, Sharpe 1.44, worst drawdown 22.4%; 2024 .. 2026 +28.3% a
+#   year, Sharpe 0.75, p 0.119, worst drawdown 42.5%, up every year (+31.7, +35.2, +13.4%).
+# - As one portfolio traded hours after the close (development): +31.7 .. +36.9% a year
+#   at 0 .. 12 hours.
+#
+# So this is the rule as it should have been written for 009: staggered, traded an hour
+# after the close as it could be, on days no one has seen. With a Sharpe ratio near 0.75
+# two years confirm it at 5% about once in four [estimate, normal returns]; not confirmed
+# will mean not shown, not absent.
+#
+# Each day from the close of 2026-11-30 on, `scripts/shadow_daily.sh` records what it holds
+# (shadow/011-xsection-carry-forward.csv): decisions only. After 2028-11-30: the archive's
+# delisted perpetuals (fetch_archive_universe.py) and hour bars (fetch_hourly.py) for the
+# period, then `--final`, once.
+id: "011"
+name: xsection-carry-forward
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, long those whose mean funding a day over the last 7 days is lowest (strictly
+  in the bottom 20%), short those whose is highest (strictly in the top 20%), half the
+  capital a side in equal weights, held 7 days as seven staggered portfolios with a seventh
+  of the capital each, one rebalanced every day, decided at the daily close and traded one
+  hour later, paying 9 bp a round trip on every unit traded and the funding as settled: its
+  daily net is above zero over 2026-12-01 .. 2028-11-30.
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: carry           # minus the mean of the daily funding sums over the last 7 days
+  hold: 7                 # days each portfolio is held
+  staggered: true         # seven of them, one rebalanced each day
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # a side
+  hours: 1                # traded this long after the daily close
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 1}
+
+trials:                   # the rules the rough look reported, traded at the same hour
+  - {hold: 1}
+  - {signal: mom7, hold: 1}
+  - {signal: mom7}
+  - {signal: mom30, hold: 1}
+  - {signal: mom30}
+  - {signal: rev1, hold: 1}
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20). Staggered portfolios
+# trading one coin the same day are not netted: an upper bound.
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 7 trials is reported, not a bar, as for 009
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)
