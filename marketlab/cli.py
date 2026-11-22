@@ -368,17 +368,21 @@ def cmd_shadow(a: argparse.Namespace) -> int:
     close = a.close or (dt.datetime.now(dt.UTC).date() - dt.timedelta(days=1)).isoformat()
     for spec_path in a.specs:
         spec = xk.load_spec(spec_path)
-        try:
-            d, path = shadow.record(a.data, spec, close, a.out)
-        except shadow.NotReady as e:
-            raise ContractError(f"{spec.slug}: {e}") from None
-        if d is None:
-            print(f"{spec.slug}: the close of {close} is recorded already ({path})")
-            continue
-        longs = sum(1 for w in d.weights.values() if w > 0)
-        shorts = sum(1 for w in d.weights.values() if w < 0)
-        print(f"{spec.slug}: close {close}, {longs} long and {shorts} short of a universe of "
-              f"{d.universe}, to trade at {d.trade_at} UTC -> {path}")  # fmt: skip
+        closes = shadow.pending(spec, close, a.out) if a.catch_up else [close]
+        if not closes:
+            print(f"{spec.slug}: the close of {close} is recorded already")
+        for day in closes:
+            try:
+                d, path = shadow.record(a.data, spec, day, a.out)
+            except shadow.NotReady as e:
+                raise ContractError(f"{spec.slug}: {e}") from None
+            if d is None:
+                print(f"{spec.slug}: the close of {day} is recorded already ({path})")
+                continue
+            longs = sum(1 for w in d.weights.values() if w > 0)
+            shorts = sum(1 for w in d.weights.values() if w < 0)
+            print(f"{spec.slug}: close {day}, {longs} long and {shorts} short of a universe of "
+                  f"{d.universe}, to trade at {d.trade_at} UTC -> {path}")  # fmt: skip
     return 0
 
 
@@ -1323,6 +1327,8 @@ def parser() -> argparse.ArgumentParser:
     sh.add_argument("--data", default="binance-data", help="default ./binance-data")
     sh.add_argument("--close", help="the daily close, YYYY-MM-DD (default: yesterday, UTC)")
     sh.add_argument("--out", default="shadow", help="default ./shadow")
+    sh.add_argument("--catch-up", action="store_true",
+                    help="also every close since the last one recorded (31 at most)")  # fmt: skip
     sh.set_defaults(run=cmd_shadow)
 
     xs_ = sub.add_parser(

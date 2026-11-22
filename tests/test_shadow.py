@@ -124,3 +124,22 @@ def test_the_universe_fetch_refuses_a_day_not_closed(tmp_path):
     with pytest.raises(SystemExit, match="is not closed yet"):
         fu.main(["--start", "2026-01-01", "--end", today, "--out", str(tmp_path), "--tries",
                  "1", "--base-url", "http://127.0.0.1:9"])  # fmt: skip
+
+
+def test_days_missed_are_caught_up(tmp_path, capsys):
+    planted(tmp_path / "d", True, seed=5)
+    spec = xk.load_spec(spec_file(tmp_path))
+    out = tmp_path / "shadow"
+    assert shadow.pending(spec, CLOSE, out) == [CLOSE]  # nothing recorded yet
+    shadow.record(tmp_path / "d", spec, CLOSE, out, today="2026-11-23")
+    assert shadow.pending(spec, CLOSE, out) == []
+    assert shadow.pending(spec, "2024-03-13", out) == ["2024-03-11", "2024-03-12", "2024-03-13"]
+    assert shadow.pending(spec, "2024-05-30", out, most=5)[0] == "2024-05-26"
+    args = ["shadow", str(spec.path), "--data", str(tmp_path / "d"), "--out", str(out),
+            "--close", "2024-03-13", "--catch-up"]  # fmt: skip
+    assert main(args) == 0
+    said = capsys.readouterr().out
+    assert all(f"close 2024-03-1{k}," in said for k in (1, 2, 3))
+    closes = {r.split(",")[0] for r in (out / f"{spec.slug}.csv").read_text().splitlines()[1:]}
+    assert closes == {CLOSE, "2024-03-11", "2024-03-12", "2024-03-13"}
+    assert main(args) == 0 and "recorded already" in capsys.readouterr().out

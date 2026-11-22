@@ -85,6 +85,24 @@ def decide(root: str | Path, spec: xk.Spec, close: str, today: str | None = None
     )
 
 
+def pending(spec: xk.Spec, close: str, out: str | Path, most: int = 31) -> list[str]:
+    """The closes to record up to `close`: those after the last one recorded (a machine off
+    for some days catches up, each decision from the data up to its own close), `most` at
+    most; just `close` if none is recorded yet."""
+    path = Path(out) / f"{spec.slug}.csv"
+    last = ""
+    if path.exists():
+        with path.open(newline="") as f:
+            rows = list(csv.reader(f))[1:]
+        last = max((r[0] for r in rows if r), default="")
+    if not last or last >= close:
+        return [close] if last != close else []
+    first = dt.date.fromisoformat(last) + dt.timedelta(days=1)
+    end = dt.date.fromisoformat(close)
+    days = [(first + dt.timedelta(days=k)).isoformat() for k in range((end - first).days + 1)]
+    return days[-most:]
+
+
 def record(root: str | Path, spec: xk.Spec, close: str, out: str | Path,
            today: str | None = None) -> tuple[Decision | None, Path]:  # fmt: skip
     """Appends `spec`'s decision at `close` to OUT/<id-name>.csv, unless that close is there

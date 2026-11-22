@@ -444,7 +444,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 208 in all, each caught.
+it is compared with and a taker filled with no latency: 210 in all, each caught.
 
 ## Numbers
 
@@ -649,13 +649,16 @@ changing it on the way. It refuses a close that is not over (today's, UTC) and o
 daily bars are not there (none for BTCUSDT or ETHUSDT, or for more than 5% of the
 perpetuals that had one the day before), and leaves a close recorded already as it was. A
 rule held for several days and not staggered rebalances on the days its held-out period's
-first day sets, as its held-out run does. `scripts/shadow_daily.sh SPEC ...`, from cron
-after 00:00 UTC, fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
+first day sets, as its held-out run does. `--catch-up` also records every close since
+the last one recorded (31 at most), each from the data up to its own close, the time it
+was decided written next to it: a machine that was off catches up. `scripts/shadow_daily.sh
+SPEC ...`, from cron or the systemd user timer in `scripts/systemd/` (00:40 UTC, run at the
+next start if the machine was off), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
 `--end` of today, whose bar Binance serves while it is still open and which would stay so)
 and records the decisions. `tests/test_shadow.py` checks a decision against what the
 held-out run holds the next day, also between rebalances, and that it is the same with
 nothing after its close on disk; a close recorded once; the refusals; and that a staggered
-rule decides the same whatever day its period began on.
+rule decides the same whatever day its period began on; and days missed caught up.
 
 ## What has been found
 

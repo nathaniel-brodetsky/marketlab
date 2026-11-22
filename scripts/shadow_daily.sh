@@ -7,6 +7,8 @@
 #   40 0 * * *  $HOME/projects/marketlab/scripts/shadow_daily.sh experiments/011-name.yaml
 #
 # The data go to binance-data/, the decisions to shadow/<id-name>.csv, the logs to runs/.
+# A day the machine was off is caught up the next time it runs (--catch-up), each decision
+# from the data up to its own close, the time it was made written next to it.
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 1
 # shellcheck disable=SC1091
@@ -19,5 +21,5 @@ if ! python scripts/fetch_universe.py --start 2020-01-01 --end "$yesterday" \
         | tee -a runs/shadow.log
 fi
 # the shadow refuses by itself a close whose bars are not there
-python -m marketlab.cli shadow "$@" --data binance-data --close "$yesterday" 2>&1 \
+python -m marketlab.cli shadow "$@" --data binance-data --close "$yesterday" --catch-up 2>&1 \
     | sed "s/^/$(date -u +%FT%TZ) /" | tee -a runs/shadow.log

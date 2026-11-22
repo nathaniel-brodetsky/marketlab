@@ -1,0 +1,11 @@
+# Every day at 00:40 UTC; Persistent: a day the machine was off runs at its next start,
+# and the shadow catches up the closes it missed.
+[Unit]
+Description=marketlab shadow, daily after 00:00 UTC
+
+[Timer]
+OnCalendar=*-*-* 00:40:00 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

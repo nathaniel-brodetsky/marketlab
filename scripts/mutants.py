@@ -1260,6 +1260,18 @@ M = [
         "    if False:",
         "today's open bar fetched as if closed",
     ),
+    (
+        "marketlab/shadow.py",
+        "    first = dt.date.fromisoformat(last) + dt.timedelta(days=1)",
+        "    first = dt.date.fromisoformat(last)",
+        "the shadow catches up from the close it has",
+    ),
+    (
+        "marketlab/shadow.py",
+        "    return days[-most:]",
+        "    return days",
+        "the shadow catches up without end",
+    ),
 ]
 survived = []
 for f, old, new, label in M:
