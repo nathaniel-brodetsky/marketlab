@@ -164,6 +164,9 @@ def main(argv: list[str] | None = None) -> int:
     a = p.parse_args(argv)
     if a.end < a.start:
         raise SystemExit(f"--end {a.end} is before --start {a.start}")
+    today = dt.datetime.now(ff.UTC).date()
+    if a.end >= today:  # Binance serves the day's bar while it is open: it would stay so
+        raise SystemExit(f"--end {a.end}: the daily bar of {today} (UTC) is not closed yet")
     base = a.base_url.rstrip("/")
     lo, hi = ff.ms(a.start), ff.ms(a.end + dt.timedelta(days=1)) - 1
     try:

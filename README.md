@@ -444,7 +444,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 202 in all, each caught.
+it is compared with and a taker filled with no latency: 208 in all, each caught.
 
 ## Numbers
 
@@ -636,6 +636,26 @@ the funding does not last, shows the development run unchanged when the held-out
 are, makes the same Sharpe ratio worth less against trials that differ more, trades a rule
 hours after the close (and its held-out run stops without its hour bars, recording
 nothing), and runs it all through the command.
+
+### The shadow
+
+`marketlab shadow SPEC ... --data binance-data --close YYYY-MM-DD` writes what each
+`xsection` hypothesis's rule would hold over the day after that daily close, decided from
+the data up to it and nothing later, to `shadow/<id-name>.csv` (the close, when it was
+decided, when it would trade, and each coin's weight): no key, no account, no order. It
+records decisions only, never what they made, since a rule tested forward is judged once,
+by `--final` on its whole held-out period, and a running score invites stopping or
+changing it on the way. It refuses a close that is not over (today's, UTC) and one whose
+daily bars are not there (none for BTCUSDT or ETHUSDT, or for more than 5% of the
+perpetuals that had one the day before), and leaves a close recorded already as it was. A
+rule held for several days and not staggered rebalances on the days its held-out period's
+first day sets, as its held-out run does. `scripts/shadow_daily.sh SPEC ...`, from cron
+after 00:00 UTC, fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
+`--end` of today, whose bar Binance serves while it is still open and which would stay so)
+and records the decisions. `tests/test_shadow.py` checks a decision against what the
+held-out run holds the next day, also between rebalances, and that it is the same with
+nothing after its close on disk; a close recorded once; the refusals; and that a staggered
+rule decides the same whatever day its period began on.
 
 ## What has been found
 

@@ -359,6 +359,29 @@ def print_xsection_report(r) -> None:
     print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
 
 
+def cmd_shadow(a: argparse.Namespace) -> int:
+    import datetime as dt
+
+    from . import shadow
+    from . import xsection_kind as xk
+
+    close = a.close or (dt.datetime.now(dt.UTC).date() - dt.timedelta(days=1)).isoformat()
+    for spec_path in a.specs:
+        spec = xk.load_spec(spec_path)
+        try:
+            d, path = shadow.record(a.data, spec, close, a.out)
+        except shadow.NotReady as e:
+            raise ContractError(f"{spec.slug}: {e}") from None
+        if d is None:
+            print(f"{spec.slug}: the close of {close} is recorded already ({path})")
+            continue
+        longs = sum(1 for w in d.weights.values() if w > 0)
+        shorts = sum(1 for w in d.weights.values() if w < 0)
+        print(f"{spec.slug}: close {close}, {longs} long and {shorts} short of a universe of "
+              f"{d.universe}, to trade at {d.trade_at} UTC -> {path}")  # fmt: skip
+    return 0
+
+
 def cmd_carry_report(a: argparse.Namespace) -> int:
     from . import carry
 
@@ -1291,6 +1314,16 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
     g.add_argument("--out", help="per-day table to this .csv or .parquet file")
     g.set_defaults(run=cmd_strategy)
+
+    sh = sub.add_parser(
+        "shadow",
+        help="what xsection hypotheses would hold after a daily close: decisions only, no order",
+    )
+    sh.add_argument("specs", nargs="+", help="committed experiments/NNN-name.yaml of kind xsection")
+    sh.add_argument("--data", default="binance-data", help="default ./binance-data")
+    sh.add_argument("--close", help="the daily close, YYYY-MM-DD (default: yesterday, UTC)")
+    sh.add_argument("--out", default="shadow", help="default ./shadow")
+    sh.set_defaults(run=cmd_shadow)
 
     xs_ = sub.add_parser(
         "xsection", help="cross-sectional signals on the perpetuals, development years only"

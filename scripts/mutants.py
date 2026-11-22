@@ -1224,6 +1224,42 @@ M = [
         "                               False)  # fmt: skip",
         "the command's --staggered ignored",
     ),
+    (
+        "marketlab/shadow.py",
+        "    if close >= today:",
+        "    if False:",
+        "the shadow decides a close not over yet",
+    ),
+    (
+        "marketlab/shadow.py",
+        "    p = xs.load(root, first, close, held_out=True)  # decisions only: no return is computed",
+        "    p = xs.load(root, first, (dt.date.fromisoformat(close) + dt.timedelta(days=5)).isoformat(), held_out=True)",
+        "the shadow decides from the days after its close",
+    ),
+    (
+        "marketlab/shadow.py",
+        "    start = anchor % rule.hold",
+        "    start = 0",
+        "the shadow's rebalance days not its held-out period's",
+    ),
+    (
+        "marketlab/shadow.py",
+        "    if lacking or not has.any() or missing > MAX_MISSING:",
+        "    if False:",
+        "the shadow decides without the close's bars",
+    ),
+    (
+        "marketlab/shadow.py",
+        "            if any(row and row[0] == close for row in r):",
+        "            if False:",
+        "a close recorded twice",
+    ),
+    (
+        "scripts/fetch_universe.py",
+        "    if a.end >= today:  # Binance serves the day's bar while it is open: it would stay so",
+        "    if False:",
+        "today's open bar fetched as if closed",
+    ),
 ]
 survived = []
 for f, old, new, label in M:
