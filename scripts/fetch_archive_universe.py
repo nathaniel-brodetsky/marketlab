@@ -174,11 +174,13 @@ def funding_rows(path: Path, lo: int, hi: int) -> list[tuple[int, str, str]]:
     return out
 
 
-def fetch_months(a, kind: str, sym: str, months: set[str]) -> tuple[list[Path], list[str]]:
-    """The monthly files of `kind` (klines/1d or fundingRate) the archive has for `sym` in
-    the months given: their paths, and what failed."""
-    sub = f"klines/{sym}/1d" if kind == "klines" else f"fundingRate/{sym}"
-    tag = "1d" if kind == "klines" else "fundingRate"
+def fetch_months(
+    a, kind: str, sym: str, months: set[str], interval: str = "1d"
+) -> tuple[list[Path], list[str]]:
+    """The monthly files of `kind` (klines of `interval`, or fundingRate) the archive has
+    for `sym` in the months given: their paths, and what failed."""
+    sub = f"klines/{sym}/{interval}" if kind == "klines" else f"fundingRate/{sym}"
+    tag = interval if kind == "klines" else "fundingRate"
     _, keys = listing(a.list_url, f"data/futures/um/monthly/{sub}/", "", a.tries, a.timeout)
     names = sorted({k.rsplit("/", 1)[1] for k in keys if k.endswith(".zip")})
     names = [n for n in names if n.startswith(f"{sym}-{tag}-") and n[-11:-4] in months]

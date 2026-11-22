@@ -477,6 +477,37 @@ def cmd_xsection(a: argparse.Namespace) -> int:
             "missing (scripts/fetch_archive_universe.py fills them in)"
         )
     )
+    if a.list_universe:
+        inu = xs.universe(p, a.top)
+        ever = [sym for j, sym in enumerate(p.symbols) if inu[:, j].any()]
+        Path(a.list_universe).write_text("\n".join(ever) + "\n")
+        print(f"{len(ever)} perpetuals ever in the universe -> {a.list_universe}")
+    if a.hours:
+        rules = []
+        for item in a.hour_rules:
+            name, _, hold = item.partition(":")
+            if name not in xs.SIGNALS or not hold.isdigit() or int(hold) < 1:
+                raise ContractError(f"--hour-rules {item}: SIGNAL:HOLD, a signal of {xs.SIGNALS}")
+            rules.append((name, int(hold)))
+        if any(not 0 <= h < 24 for h in a.hours):
+            raise ContractError("--hours: from 0 to 23 after the daily close")
+        rows = xs.at_hours(p, a.data, rules, sorted(set(a.hours)), a.top, a.q, a.cost, a.first)
+        t = pl.DataFrame(rows).pivot(on="hours", index="rule", values="net_pct")
+        with _wide():
+            print("\nnet, % a year, traded H hours after the daily close (columns: H):")
+            print(t.with_columns(cs.float().round(1)))
+            print("Sharpe from months:")
+            print(pl.DataFrame(rows).pivot(on="hours", index="rule", values="sharpe_months")
+                  .with_columns(cs.float().round(2)))  # fmt: skip
+            print("share of positions with an hour bar at both ends of the day:")
+            print(pl.DataFrame(rows).pivot(on="hours", index="rule", values="priced")
+                  .with_columns(cs.float().round(3)))  # fmt: skip
+        print(
+            "The rule decides at the daily close as ever and trades H hours later, at the open "
+            "of that hour's bar, held to the same hour after its next rebalance; the funding "
+            "settled from that hour on. A position without an hour bar returns nothing that "
+            f"day. {a.cost:g} bp a round trip; no bar after {xs.DEV_END} is read."
+        )
     for item in a.explain or []:
         name, _, hold = item.partition(":")
         if name not in xs.SIGNALS or not hold.isdigit() or int(hold) < 1:
@@ -1267,6 +1298,18 @@ def parser() -> argparse.ArgumentParser:
         metavar="SIGNAL:HOLD",
         help="where the money came from, e.g. carry:1",
     )
+    xs_.add_argument(
+        "--hours",
+        type=int,
+        nargs="*",
+        metavar="H",
+        help="trade the rules of --hour-rules H hours after the daily close, from hourly bars "
+        "(scripts/fetch_hourly.py), e.g. 0 1 2 4 8",
+    )
+    xs_.add_argument("--hour-rules", nargs="+", metavar="SIGNAL:HOLD",
+                     default=["mom7:1", "carry:7", "carry:1"])  # fmt: skip
+    xs_.add_argument("--list-universe", metavar="FILE",
+                     help="write every perpetual ever in the universe, one a line")  # fmt: skip
     xs_.set_defaults(run=cmd_xsection)
 
     w = sub.add_parser(

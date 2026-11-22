@@ -410,3 +410,31 @@ def test_the_archive_fills_in_the_perpetuals_gone_and_the_bars_not_served(server
     # a listing that is not one fails the run
     assert fa.main([*args[:-3], server.url + "/nothing", "--funding-pause", "0"]) == 1
     assert "the archive's list of perpetuals" in capsys.readouterr().err
+
+
+fh = _load("fetch_hourly")
+
+
+def test_the_hourly_bars_of_the_months_with_daily_ones(server, tmp_path, capsys):
+    # AAAUSDT has daily bars from 2021-02-10 to 2021-04-20; the archive has its hour bars for
+    # January .. May, but only February .. April are its months, and May is past --end
+    daily = [[str(r[0]), *r[1:6], r[7], str(r[8])] for r in _bars("2021-02-10", 70)]
+    fu.write_rows(tmp_path / "um" / "klines1d" / "AAAUSDT.csv", fu.KLINE_COLUMNS, daily)
+    for month in ("2021-01", "2021-02", "2021-03", "2021-04", "2021-05"):
+        name = f"AAAUSDT-1h-{month}.zip"
+        key = f"data/futures/um/monthly/klines/AAAUSDT/1h/{name}"
+        _publish(server, "/" + key, _zip(name, "1,1,1,1,1,1,1,1,1,1,1,0\n"))
+        server.bucket |= {key, key + ".CHECKSUM"}
+    names = tmp_path / "symbols.txt"
+    names.write_text("AAAUSDT\nNOBARSUSDT\n")
+    args = ["--symbols-file", str(names), "--start", "2021-01-01", "--end", "2021-04-30",
+            "--out", str(tmp_path), "--base-url", server.url, "--list-url",
+            server.url + "/bucket"]  # fmt: skip
+    assert fh.main(args) == 0
+    out = capsys.readouterr().out
+    got = sorted(f.name for f in (tmp_path / "um" / "klines" / "AAAUSDT" / "1h").glob("*.zip"))
+    assert got == [f"AAAUSDT-1h-2021-0{m}.zip" for m in (2, 3, 4)]
+    assert "AAAUSDT          3 of 3 months" in out and "NOBARSUSDT       no daily bars" in out
+    zips = [c for c in server.calls if c.endswith(".zip")]
+    assert fh.main(args) == 0  # again: nothing downloaded twice
+    assert [c for c in server.calls if c.endswith(".zip")] == zips

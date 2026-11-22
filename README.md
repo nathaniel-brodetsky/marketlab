@@ -444,7 +444,7 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 186 in all, each caught.
+it is compared with and a taker filled with no latency: 194 in all, each caught.
 
 ## Numbers
 
@@ -738,15 +738,31 @@ fifth of the signal the median next day is 0 bp or below while the mean rises fr
 follow the breakdown: the portfolio's beta to the universe (equal weights) and its net less
 beta times it, and the same portfolio decided a day late (the day before's signal and
 universe), which shows how much of it rests on trading at the very close its signal was
-read at.
+read at. With them in [backtest, 2020 .. 2023]: carry weekly 0.00 and +33.4% a day late,
+carry daily 0.02 and +44.1%, momentum over 7 days -0.04 and +30.2% (from +56.1%): its money
+is in the first day after the signal.
+
+How much of it is in the first hours, hourly bars say. `--list-universe FILE` writes every
+perpetual ever in the universe; `python scripts/fetch_hourly.py --symbols-file FILE --start
+2020-01-01 --end 2023-12-31` downloads their hourly klines from the archive (each monthly
+file checked against its checksum, under `um/klines/<SYMBOL>/1h/`) for the months in which
+each has daily bars; and `--hours 0 1 2 4 8 --hour-rules mom7:1 carry:7` trades each rule,
+decided at the daily close as ever, that many hours later, at the open of that hour's bar,
+held to the same hour after its next rebalance, the funding settled from that hour on: its
+net a year, Sharpe from months, and the share of its positions with an hour bar at both
+ends of the day. No hour bar after 2023-12-31 is read: a month's file after it is not
+opened, and the last development day, whose trading hour falls in 2024, returns nothing.
 `tests/test_xsection.py` works the universe, the portfolio, its costs and its funding out
 by hand, finds a planted momentum and nothing where there is none, shows the held-out
 years are neither asked for nor read, and that the breakdown adds up to the net and finds
 a planted jump, the beta of a portfolio that only rides the market and nothing left once it
 is taken out, and a one-day reversal that pays on time and costs a day late; that only the
 perpetuals on coins, listed or gone, are read, and a settlement given twice is refused;
-`tests/test_fetch.py` runs both downloads against a local server that also answers as the
-archive's S3 listing does, with contracts of other types and one still trading in it.
+a day traded hours after the close worked out by hand, its funding from that hour on, and a
+move made in the first two hours that pays at the close and costs four hours later;
+`tests/test_fetch.py` runs the downloads against a local server that also answers as the
+archive's S3 listing does, with contracts of other types and one still trading in it, and
+hourly bars fetched only for the months with daily ones.
 
 ## Tests
 

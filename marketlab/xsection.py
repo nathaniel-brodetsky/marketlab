@@ -170,6 +170,117 @@ def largest_funding(p: Panel, inu: np.ndarray, start: int, n: int = 5) -> list[d
     return out
 
 
+HOUR_MS = 3_600_000
+
+
+def _hourly_opens(root: str | Path, sym: str, held_out: bool) -> tuple[np.ndarray, np.ndarray]:
+    """(hours since the epoch, the open of the hour bar starting then) from the monthly
+    files under um/klines/<sym>/1h; a file of a month after `DEV_END`'s is not opened,
+    unless `held_out`."""
+    import io
+    import zipfile
+
+    folder = Path(root) / "um" / "klines" / sym / "1h"
+    last = DEV_END[:7]
+    hours, opens = [], []
+    for f in sorted(folder.glob(f"{sym}-1h-*.zip")):
+        if not held_out and f.stem[-7:] > last:
+            continue
+        with zipfile.ZipFile(f) as z:
+            names = [n for n in z.namelist() if n.endswith(".csv")]
+            if len(names) != 1:
+                raise ValueError(f"{f}: expected one CSV inside, found {names}")
+            data = z.read(names[0])
+        if not data.strip():
+            continue
+        header = not data[:1].isdigit()
+        raw = pl.read_csv(io.BytesIO(data), has_header=header, infer_schema=False,
+                          new_columns=None if header else [f"c{k}" for k in range(12)])  # fmt: skip
+        t = raw[raw.columns[0]].cast(pl.Int64).to_numpy()
+        t = np.where(t > 10**14, t // 1000, t)  # µs from 2025 on, ms before
+        hours.append(t // HOUR_MS)
+        opens.append(raw[raw.columns[1]].cast(pl.Float64).to_numpy())
+    if not hours:
+        return np.zeros(0, dtype=np.int64), np.zeros(0)
+    h, o = np.concatenate(hours), np.concatenate(opens)
+    order = np.argsort(h, kind="stable")
+    return h[order], o[order]
+
+
+@dataclass
+class Lagged:
+    """A long's return each day as if traded `hours` after each daily close: from the open
+    of the hour bar `hours` after one close to that after the next, less the funding settled
+    between (the hour itself included, as a close includes its own settlement)."""
+
+    hours: int
+    r: np.ndarray  # days x symbols, NaN where an hour bar is missing at either end
+    priced: np.ndarray  # days x symbols: an hour bar at that day's trading time
+
+
+def lagged(p: Panel, root: str | Path, hours: list[int],
+           held_out: bool = False) -> dict[int, Lagged]:  # fmt: skip
+    """`p`'s returns traded each of `hours` (0 .. 23) after each daily close. Day `D`'s
+    close is the start of day `D + 1`; traded `hours` later, at its hour bar's open. Nothing
+    from `DEV_END`'s next day on is read, bars nor funding, unless `held_out`."""
+    if any(not 0 <= h < 24 for h in hours):
+        raise ValueError("hours: from 0 to 23 after the close")
+    if p.dates[-1] > DEV_END and not held_out:
+        raise HeldOut(f"{p.dates[-1]} is after {DEV_END}: the years after it are held out")
+    day0 = (dt.date.fromisoformat(p.dates[0]) - dt.date(1970, 1, 1)).days
+    end_ms = ((dt.date.fromisoformat(DEV_END) - dt.date(1970, 1, 1)).days + 1) * 86_400_000
+    n, m = len(p.dates), len(p.symbols)
+    price = {L: np.full((n, m), np.nan) for L in hours}
+    fund = {L: np.zeros((n, m)) for L in hours}
+    for j, sym in enumerate(p.symbols):
+        h, o = _hourly_opens(root, sym, held_out)
+        fr = Path(root) / "um" / "fundingRate" / sym / f"{sym}-fundingRate.csv"
+        rf = read_columns(fr, FUNDING_TYPES) if fr.exists() else None
+        if rf is not None and not held_out:  # the last day's window reaches past DEV_END
+            rf = rf.filter(pl.col("funding_time") < end_ms)
+        for L in hours:
+            if len(h):
+                want = (day0 + 1 + np.arange(n)) * 24 + L  # day D's trading hour
+                k = np.clip(np.searchsorted(h, want), 0, len(h) - 1)
+                price[L][:, j] = np.where(h[k] == want, o[k], np.nan)
+            if rf is not None:
+                t = rf["funding_time"].to_numpy()
+                d = (t - L * HOUR_MS) // 86_400_000 - day0  # [D + L, D + 1 + L)
+                ok = (d >= 0) & (d < n)
+                np.add.at(fund[L][:, j], d[ok], rf["funding_rate"].to_numpy()[ok])
+    return {L: Lagged(L, price[L] / _lag(price[L], 1) - 1 - fund[L], np.isfinite(price[L]))
+            for L in hours}  # fmt: skip
+
+
+def at_hours(p: Panel, root: str | Path, rules: list[tuple[str, int]], hours: list[int],
+             top: int = 50, q: float = 0.2, cost_bp: float = 9.0,
+             first: str = "2020-01-01") -> list[dict]:  # fmt: skip
+    """Each rule (signal, hold) decided at the daily close as ever, traded `hours` later:
+    its net a year, Sharpe from months, and the share of its positions with an hour bar to
+    trade at (a position without one returns nothing that day)."""
+    x, inu = signals(p), universe(p, top)
+    start = p.dates.index(first) if first in p.dates else 0
+    month = np.array([d[:7] for d in p.dates[start:]])
+    years = (len(p.dates) - start) / 365.0
+    lag = lagged(p, root, hours)
+    out = []
+    for name, hold in rules:
+        held, _, _, _ = holdings(x[name], inu, start, hold, q)
+        for L in hours:
+            pnl, _, _ = portfolio(x[name], inu, lag[L].r, start, hold, q, cost_bp)
+            net = pnl[start:]
+            sums = np.array([net[month == mo].sum() for mo in dict.fromkeys(month)])
+            on = held != 0
+            before = np.zeros_like(lag[L].priced)
+            before[1:] = lag[L].priced[:-1]
+            ends = lag[L].priced & before  # a price at both ends of the day
+            priced = float(ends[on].mean()) if on.any() else float("nan")
+            out.append({"rule": f"{name}:{hold}", "hours": L, "priced": priced,
+                        "net_pct": float(net.sum() / years * 100),
+                        "sharpe_months": _sharpe(sums)})  # fmt: skip
+    return out
+
+
 def _lag(a: np.ndarray, k: int) -> np.ndarray:
     out = np.full_like(a, np.nan)
     out[k:] = a[:-k] if k else a

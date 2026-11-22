@@ -290,3 +290,111 @@ def test_the_command_explains(tmp_path, capsys):
     assert "the largest funding in a day, in the universe: C" in out and "(3 settlements)" in out
     assert main(["xsection", "--data", str(tmp_path), "--first", "2021-03-01", "--until",
                  "2021-10-31", "--explain", "nothing:1"]) == 2  # fmt: skip
+
+
+def hourly(root, sym, first_day: str, days: int, price) -> None:
+    """Monthly hour-bar archives, as Binance publishes them (no header): `price(hour)` is
+    each bar's open, `hour` counted from the epoch."""
+    import io
+    import zipfile
+
+    h0 = ms(first_day) // 3_600_000
+    by_month: dict[str, list[str]] = {}
+    for h in range(h0, h0 + days * 24):
+        t = h * 3_600_000
+        month = dt.datetime.fromtimestamp(t / 1000, dt.UTC).strftime("%Y-%m")
+        o = price(h)
+        by_month.setdefault(month, []).append(f"{t},{o},{o},{o},{o},1,{t + 3_599_999},1,1,1,1,0")
+    folder = root / "um" / "klines" / sym / "1h"
+    folder.mkdir(parents=True, exist_ok=True)
+    for month, rows in by_month.items():
+        buf = io.BytesIO()
+        with zipfile.ZipFile(buf, "w") as z:
+            z.writestr(f"{sym}-1h-{month}.csv", "\n".join(rows) + "\n")
+        (folder / f"{sym}-1h-{month}.zip").write_bytes(buf.getvalue())
+
+
+def test_traded_hours_after_the_close_by_hand(tmp_path):
+    # one coin, its price at hour h is 100 + h / 1000; funding at 0, 8 and 16 h, a distinct
+    # rate each: 1e-6 times the hour of the day plus one, times the day's number plus one
+    days = 60
+    day0 = ms("2023-11-15") // 86_400_000
+    close = [100 + ((day0 + i + 1) * 24) / 1000 for i in range(days)]  # the next 00:00's open
+    write(tmp_path, "AUSDT", "2023-11-15", close, np.ones(days))
+    f = tmp_path / "um" / "fundingRate" / "AUSDT" / "AUSDT-fundingRate.csv"
+    f.parent.mkdir(parents=True, exist_ok=True)
+    rows = ["funding_time,funding_rate,mark_price"]
+
+    def rate(i, h):
+        return 1e-6 * (h + 1) * (i + 1)
+
+    for i in range(days + 1):
+        for h in (0, 8, 16):
+            rows.append(f"{(day0 + i) * 86_400_000 + h * 3_600_000},{rate(i, h)},")
+    f.write_text("\n".join(rows) + "\n")
+    hourly(tmp_path, "AUSDT", "2023-11-15", days + 1, lambda h: 100 + h / 1000)
+    # a month after the development years that would not even open
+    (tmp_path / "um" / "klines" / "AUSDT" / "1h" / "AUSDT-1h-2024-02.zip").write_text("no zip")
+    p = xs.load(tmp_path, "2023-12-26", "2023-12-31")
+    lag = xs.lagged(p, tmp_path, [0, 5])
+    daily = xs.daily_returns(p)
+    i = p.dates.index("2023-12-28")
+    d = ms("2023-12-28") // 3_600_000  # that day's first hour
+    assert lag[0].r[i, 0] == pytest.approx(daily[i, 0])  # at the close: as the daily bars
+    # five hours later: from 05:00 to the next 05:00, paying the 08:00 and 16:00 settlements
+    # of that day and the next 00:00's
+    k = d // 24 - day0
+    paid = rate(k, 8) + rate(k, 16) + rate(k + 1, 0)
+    want = (100 + (d + 24 + 5) / 1000) / (100 + (d + 5) / 1000) - 1 - paid
+    assert lag[5].r[i, 0] == pytest.approx(want)
+    last = p.dates.index("2023-12-31")  # its trading hour is in 2024: not read
+    assert np.isnan(lag[0].r[last, 0]) and np.isnan(lag[5].r[last, 0])
+    assert lag[5].priced[last - 1, 0] and not lag[5].priced[last, 0]
+    with pytest.raises(ValueError, match="from 0 to 23"):
+        xs.lagged(p, tmp_path, [24])
+    held = xs.load(tmp_path, "2024-01-01", "2024-01-05", held_out=True)
+    with pytest.raises(xs.HeldOut):
+        xs.lagged(held, tmp_path, [0])
+
+
+def zigzag(root, days=120):
+    """Twelve coins whose daily close swings up and down by a_j, the hour bars making the
+    day's whole move in its first two hours: traded at the close, a reversal gets it all;
+    four hours later, it is already gone and the next day's move is the wrong way."""
+    day0 = ms("2021-01-01") // 86_400_000
+    for j in range(12):
+        a = 0.01 * (j + 1)
+
+        def level(b, a=a):
+            return 10 * np.exp(a * (-1.0) ** b)
+
+        close = [level(day0 + i + 1) for i in range(days)]
+        write(root, f"C{j:02d}USDT", "2021-01-01", close, np.full(days, 1e6 + j))
+        hourly(root, f"C{j:02d}USDT", "2021-01-01", days + 1,
+               lambda h, level=level: level(h // 24 + (1 if h % 24 >= 2 else 0)))  # fmt: skip
+
+
+def test_a_move_made_in_the_first_hours_pays_at_the_close_and_not_four_hours_later(tmp_path):
+    zigzag(tmp_path)
+    p = xs.load(tmp_path, "2021-03-01", "2021-04-30")
+    rows = xs.at_hours(p, tmp_path, [("rev1", 1)], [0, 4], top=12, first="2021-03-01")
+    by = {r["hours"]: r for r in rows}
+    whole = xs.evaluate(p, "rev1", xs.signals(p)["rev1"], 1, 12, 0.2, 9.0, "2021-03-01")
+    assert by[0]["net_pct"] == pytest.approx(whole.net_pct, rel=1e-6)
+    assert by[4]["net_pct"] < -1000 and by[4]["sharpe_months"] < 0
+    assert by[0]["priced"] == 1.0 and by[4]["priced"] == 1.0
+
+
+def test_the_command_trades_hours_after_the_close(tmp_path, capsys):
+    zigzag(tmp_path)
+    args = ["xsection", "--data", str(tmp_path), "--first", "2021-03-01", "--until",
+            "2021-04-30", "--top", "12"]  # fmt: skip
+    out_file = tmp_path / "universe.txt"
+    assert main([*args, "--hours", "0", "4", "--hour-rules", "rev1:1",
+                 "--list-universe", str(out_file)]) == 0  # fmt: skip
+    out = capsys.readouterr().out
+    assert "traded H hours after the daily close" in out and "rev1:1" in out
+    assert "12 perpetuals ever in the universe" in out
+    assert out_file.read_text().split() == [f"C{j:02d}USDT" for j in range(12)]
+    assert main([*args, "--hours", "24"]) == 2
+    assert main([*args, "--hours", "1", "--hour-rules", "rev2:1"]) == 2

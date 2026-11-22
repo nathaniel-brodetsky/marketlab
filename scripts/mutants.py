@@ -1128,6 +1128,54 @@ M = [
         "    if False:",
         "the deflated Sharpe ratio's bar not asked for",
     ),
+    (
+        "marketlab/xsection.py",
+        "        if not held_out and f.stem[-7:] > last:",
+        "        if False:",
+        "the hour bars of the held-out months opened",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    if p.dates[-1] > DEV_END and not held_out:",
+        "    if False:",
+        "the hours after the close read the held-out years",
+    ),
+    (
+        "marketlab/xsection.py",
+        "                want = (day0 + 1 + np.arange(n)) * 24 + L  # day D's trading hour",
+        "                want = (day0 + np.arange(n)) * 24 + L",
+        "the trading hour a day early",
+    ),
+    (
+        "marketlab/xsection.py",
+        "                price[L][:, j] = np.where(h[k] == want, o[k], np.nan)",
+        "                price[L][:, j] = o[k]",
+        "a missing hour bar priced from the one after it",
+    ),
+    (
+        "marketlab/xsection.py",
+        "                d = (t - L * HOUR_MS) // 86_400_000 - day0  # [D + L, D + 1 + L)",
+        "                d = t // 86_400_000 - day0",
+        "the funding of the calendar day whatever the trading hour",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            pnl, _, _ = portfolio(x[name], inu, lag[L].r, start, hold, q, cost_bp)",
+        "            pnl, _, _ = portfolio(x[name], inu, daily_returns(p), start, hold, q, cost_bp)",
+        "the hours after the close priced at the close",
+    ),
+    (
+        "scripts/fetch_hourly.py",
+        "    return have & wanted",
+        "    return wanted",
+        "hour bars asked for months without daily ones",
+    ),
+    (
+        "scripts/fetch_archive_universe.py",
+        '    sub = f"klines/{sym}/{interval}" if kind == "klines" else f"fundingRate/{sym}"',
+        '    sub = f"klines/{sym}/1d" if kind == "klines" else f"fundingRate/{sym}"',
+        "the hour bars looked for among the daily ones",
+    ),
 ]
 survived = []
 for f, old, new, label in M:
