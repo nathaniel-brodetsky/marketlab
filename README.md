@@ -47,7 +47,7 @@ on which days.
 | 012 | 011 with each position on isolated margin | failed on development: its liquidations cost more than its floor saved |
 | 013 | 011 with each position sold once it has lost its weight | passed development; tested forward to 2028-11-30 |
 | 014 | 011 with its capital split among the hour after each funding settlement | passed development; tested forward to 2028-11-30 |
-| 015 | 011's shorts against the rest of the universe | written; tested forward to 2028-11-30 |
+| 015 | 011's shorts against the rest of the universe | passed development; tested forward to 2028-11-30 |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -803,7 +803,7 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 012 the same, each position on isolated margin | failed on development: p after Benjamini-Hochberg 0.062 (PBO 0.02, deflated Sharpe 0.54, reported); its held-out period informs, decides nothing | traded an hour after the close, +21.5% a year 2020 .. 2023, Sharpe from months 0.87, worst drawdown 28.5%, against 1.27 for 011 the same way: squeezed coins went far past their close within the day, and a position liquidated there lost what the close gave back |
 | 013 as 011, each position sold once it has lost its weight | passed on development (PBO 0.04, deflated Sharpe 0.80 against 12 trials, reported); held out forward over the same two years | traded an hour after the close, +27.7% a year 2020 .. 2023 (Sharpe from months 1.28, worst drawdown 20.9%; 2022 +0.2%), against +27.4% (1.26) for 011 the same way |
 | 014 as 011, its capital split among the hour after each funding settlement | passed on development (PBO 0.02, deflated Sharpe 0.90 against 13 trials, reported); held out forward over the same two years | +26.1% a year 2020 .. 2023 (Sharpe from months 1.24, worst drawdown 22.8%), against +27.4% (1.26) for 011, traded an hour after the close only |
-| 015 as 011, its long half the rest of the universe | written; held out forward over the same two years | |
+| 015 as 011, its long half the rest of the universe | passed on development (PBO 0.07, deflated Sharpe 0.79 against 14 trials, reported); held out forward over the same two years | +19.5% a year 2020 .. 2023 (Sharpe from months 1.20, worst drawdown 15.0%, beta -0.01; +10.9, +50.2, +5.9 and +10.8% by year), against +27.4% (1.26, worst drawdown 20.9%) for 011, traded an hour after the close only |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
