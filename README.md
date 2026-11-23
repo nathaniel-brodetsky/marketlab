@@ -1,21 +1,91 @@
 # marketlab
 
-Research on order-book data recorded by
-[marketrec](https://github.com/nathaniel-brodetsky/marketrec): it reads the recorder's
-tables, leaves out every interval in which the data cannot be trusted, builds bars and
-microstructure features with a test that none of them uses data from after its own time,
-simulates fills by queue position to measure what trading would have cost, and runs each
-hypothesis through one validation protocol from a file committed before the run.
+**A research lab for crypto markets in which every hypothesis is committed before its data
+is read, and judged once on days it has never seen.**
 
-Status: the contract reader, bars, the first layer of features, the fill simulator with
-markouts, and the validation protocol with its first experiment written down
-(`experiments/001-mlofi.yaml`). Its result goes into `results/` once it has run on the
-recorded days, whatever the verdict. Hawkes processes and the viewer come next. This file
-lists only what is implemented and tested.
+[![ci](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml/badge.svg)](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml)
+![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
+![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
+![hypotheses](https://img.shields.io/badge/hypotheses-12%20written%2C%20failures%20kept-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-233%20caught-0b0b0b)
+
+From order books recorded tick by tick by
+[marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
+perpetuals over seven years:
+microstructure features, a fill simulator by queue position, Hawkes processes,
+cross-sectional rules on Binance's public archives, and one validation protocol for all of
+them. A hypothesis that failed stays in `results/` next to the ones that passed. This file
+describes only what is implemented and tested; every number in it is a backtest, and says
+on which days.
+
+## At a glance
+
+| | |
+|---|---|
+| **The rule** | a hypothesis is a YAML file committed before its first run; the runner refuses anything else and writes the commit into the result. Its held-out days are opened once, and a second time is refused. |
+| **The protocol** | purged and combinatorial cross-validation, at least 200 surrogates of each of three kinds, Benjamini-Hochberg over every hypothesis ever written (unrun ones at p = 1), the probability of backtest overfitting, the deflated Sharpe ratio against every rule looked at first. |
+| **Costs** | every trading rule through a fill simulator by queue position, judged in its pessimistic mode, or at a futures taker's 9 bp a round trip and the funding as settled. |
+| **Found** | order flow forecasts the next second and volatility the size of the next moves, out of sample; neither pays its fees. Funding carry pays after them: spot against perpetual at about the rate of Treasury bills since 2022, carry across coins more, but not yet distinguishably from noise. |
+| **Running** | carry across coins, tested forward on days that do not exist yet (2026-12-01 .. 2028-11-30), its decisions recorded every day before they would trade. |
+| **Checked** | a look-ahead test that cuts days at random times and finds nothing before the cut changed; 233 deliberately injected one-line faults, each caught by the tests. |
+
+## Results so far
+
+| | hypothesis | verdict |
+|---|---|---|
+| 001 | multi-level order-flow imbalance forecasts the next second | passed on development: rank IC 0.29, positive on every day |
+| 002 | a maker that withdraws on order flow loses less | failed |
+| 003 | Hawkes intensity forecasts volatility | failed (p 0.066 after Benjamini-Hochberg) |
+| 004 | VPIN forecasts volatility | failed |
+| 005 | trade flow over 100 trades forecasts the next 30 s | held out: IC 0.057, positive on all 21 days |
+| 006 | 44 trade-only signals, screened as one hypothesis | 3 of 3 confirmed held out: recent volatility forecasts the size of the next 30 s |
+| 007 | trade flow pays a taker's 9 bp | failed: 3.1 ± 1.0 bp at best |
+| 008 | BTC spot against its perpetual, for the funding | confirmed: 6.0% a year of the notional, 2024 .. 2026 |
+| 009 | funding carry across coins | confirmed at p 0.0499, then shown to be its start day's luck |
+| 010 | momentum across coins | failed: PBO 0.55 |
+| 011 | the carry as seven staggered portfolios | passed development; tested forward to 2028-11-30 |
+| 012 | the same, each position on isolated margin | failed on development: its liquidations cost more than its floor saved |
+
+The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  subgraph rec["marketrec (Rust)"]
+    ws["Binance WebSocket and REST"] --> pq["Parquet tables and a quality journal"]
+  end
+  subgraph lab["marketlab (Python)"]
+    io["contract reader: valid intervals, segments"] --> feat["bars, features, Hawkes"]
+    io --> sim["fill simulator by queue position"]
+    arch["Binance public archives: trades, klines, funding"] --> xs["cross-section and carry"]
+    spec["experiments/NNN.yaml, committed first"] --> proto["validation protocol"]
+    feat --> proto
+    sim --> proto
+    xs --> proto
+    proto --> res["results/NNN.json, failures included"]
+    xs --> shadow["shadow: each day's decisions, before they trade"]
+  end
+  pq -->|SCHEMA.md| io
+```
 
 The data contract is [`SCHEMA.md`](SCHEMA.md), a copy of marketrec's, version 1. marketrec
 only writes those files and marketlab only reads them; the two repositories share nothing
 else.
+
+## Contents
+
+- **Recorded order books**: [Run](#run) · [App](#app) · [Architecture](#architecture) ·
+  [Where the data can be used](#where-the-data-can-be-used) · [Bars](#bars) ·
+  [Features](#features-layer-1) · [Point processes](#point-processes-layer-2) ·
+  [Execution](#execution) · [Strategy](#strategy)
+- **Judging a hypothesis**: [Validation protocol](#validation-protocol) ·
+  [No look-ahead](#no-look-ahead) · [Numbers](#numbers) · [Limitations](#limitations) ·
+  [Tests](#tests)
+- **Public archives, many coins**: [Binance public archives](#binance-public-archives) ·
+  [The cost wall](#where-to-look-the-cost-wall) ·
+  [Many coins, a day at a time](#many-coins-a-day-at-a-time-a-rough-look)
+- **Results**: [What has been found](#what-has-been-found)
 
 ## Run
 
@@ -699,7 +769,7 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 009 funding carry across coins | passed on development (deflated Sharpe 0.50, reported); held out confirmed, p 0.0499, but by its rebalance day's luck (below) | +36.4% a year 2020 .. 2023, Sharpe from months 1.42; held out +46.7% (Sharpe 1.16, worst drawdown 50.5%), the other six days of the week from +4.7% to +56.3% |
 | 010 momentum across coins, an hour after the close | failed on development: PBO 0.55 over its 3 variants; its held-out period informs, decides nothing | +50.5% a year 2020 .. 2023, Sharpe from months 1.40, p after BH 0.004 |
 | 011 funding carry across coins, staggered, an hour after the close | passed on development (PBO 0.03, deflated Sharpe 0.76, reported); held out forward, 2026-12-01 .. 2028-11-30, recorded day by day by the shadow | at the close, +29.2% a year 2020 .. 2023 (Sharpe from months 1.34), +27.4% 2024 .. 2026 (0.73, p 0.126, worst drawdown 42.5%) |
-| 012 the same, each position on isolated margin | written; held out forward over the same two years | |
+| 012 the same, each position on isolated margin | failed on development: p after Benjamini-Hochberg 0.062 (PBO 0.02, deflated Sharpe 0.54, reported); its held-out period informs, decides nothing | traded an hour after the close, +21.5% a year 2020 .. 2023, Sharpe from months 0.87, worst drawdown 28.5%, against 1.27 for 011 the same way: squeezed coins went far past their close within the day, and a position liquidated there lost what the close gave back |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
