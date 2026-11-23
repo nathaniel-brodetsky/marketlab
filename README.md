@@ -7,7 +7,7 @@ is read, and judged once on days it has never seen.**
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
 ![hypotheses](https://img.shields.io/badge/hypotheses-12%20written%2C%20failures%20kept-0b0b0b)
-![injected faults](https://img.shields.io/badge/injected%20faults-233%20caught-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-234%20caught-0b0b0b)
 
 From order books recorded tick by tick by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
@@ -27,7 +27,7 @@ on which days.
 | **Costs** | every trading rule through a fill simulator by queue position, judged in its pessimistic mode, or at a futures taker's 9 bp a round trip and the funding as settled. |
 | **Found** | order flow forecasts the next second and volatility the size of the next moves, out of sample; neither pays its fees. Funding carry pays after them: spot against perpetual at about the rate of Treasury bills since 2022, carry across coins more, but not yet distinguishably from noise. |
 | **Running** | carry across coins, tested forward on days that do not exist yet (2026-12-01 .. 2028-11-30), its decisions recorded every day before they would trade. |
-| **Checked** | a look-ahead test that cuts days at random times and finds nothing before the cut changed; 233 deliberately injected one-line faults, each caught by the tests. |
+| **Checked** | a look-ahead test that cuts days at random times and finds nothing before the cut changed; 234 deliberately injected one-line faults, each caught by the tests. |
 
 ## Results so far
 
@@ -516,7 +516,8 @@ stages (point processes, the maker probe, the strategy and its gate, the archive
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
 it is compared with and a taker filled with no latency; and the cross-section's, among them
 coins tied on a rate ranked by rounding, a day's span an hour late, a liquidated position
-bought back for free and one whose losses are forgotten the next day: 233 in all, each
+bought back for free and one whose losses are forgotten the next day, and a symbol in Chinese letters asked for as it
+is: 234 in all, each
 caught.
 
 ## Numbers

@@ -62,8 +62,8 @@ def server(monkeypatch):
                 body = json.dumps(rows[: int(q["limit"])]).encode()
             elif u.path == "/bucket":
                 body = _s3_listing(state, dict(urllib.parse.parse_qsl(u.query)))
-            elif u.path in state.files:
-                body = state.files[u.path]
+            elif urllib.parse.unquote(u.path) in state.files:  # as a server reads an escape
+                body = state.files[urllib.parse.unquote(u.path)]
             else:
                 self.send_response(404)
                 self.end_headers()
@@ -438,3 +438,14 @@ def test_the_hourly_bars_of_the_months_with_daily_ones(server, tmp_path, capsys)
     zips = [c for c in server.calls if c.endswith(".zip")]
     assert fh.main(args) == 0  # again: nothing downloaded twice
     assert [c for c in server.calls if c.endswith(".zip")] == zips
+    # a symbol in Chinese letters, as Binance lists some: its files asked for in UTF-8 escapes
+    sym = "龙虾USDT"
+    fu.write_rows(tmp_path / "um" / "klines1d" / f"{sym}.csv", fu.KLINE_COLUMNS, daily)
+    name = f"{sym}-1h-2021-03.zip"
+    key = f"data/futures/um/monthly/klines/{sym}/1h/{name}"
+    _publish(server, "/" + key, _zip(name, "1,1,1,1,1,1,1,1,1,1,1,0\n"))
+    server.bucket |= {key, key + ".CHECKSUM"}
+    names.write_text(f"{sym}\n")
+    assert fh.main(args) == 0
+    assert (tmp_path / "um" / "klines" / sym / "1h" / name).exists()
+    assert f"{sym:<16} 1 of 3 months (2 not in the archive)" in capsys.readouterr().out

@@ -30,6 +30,7 @@ import hashlib
 import sys
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 import zipfile
 from pathlib import Path
@@ -74,6 +75,9 @@ def target(
 
 
 def _open(url: str, timeout: float):
+    # a symbol may hold letters outside ASCII (Chinese ones, on Binance): sent as UTF-8 escapes,
+    # what is escaped already and the URL's own punctuation left as they are
+    url = urllib.parse.quote(url, safe=":/?#[]@!$&'()*+,;=%~")
     try:
         return urllib.request.urlopen(urllib.request.Request(url, headers=AGENT), timeout=timeout)
     except urllib.error.HTTPError as e:

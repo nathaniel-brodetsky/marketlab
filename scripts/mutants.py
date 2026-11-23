@@ -1410,6 +1410,12 @@ M = [
         "        longs, shorts = idx[v >= hi], idx[v <= lo]",
         "coins tied at the cut taken in",
     ),
+    (
+        "scripts/fetch_binance.py",
+        '    url = urllib.parse.quote(url, safe=":/?#[]@!$&\'()*+,;=%~")',
+        "    pass",
+        "a symbol in Chinese letters asked for as it is",
+    ),
 ]
 survived = []
 for f, old, new, label in M:
