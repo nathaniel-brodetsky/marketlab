@@ -269,3 +269,54 @@ def test_the_committed_forward_carry_loads():
     assert len(spec.trials) == 7 and all(t.hours == 1 for t in spec.trials)
     assert (spec.holdout_first, spec.holdout_last) == ("2026-12-01", "2028-11-30")
     assert spec.min_dsr is None and spec.min_positive_years == 2
+
+
+def test_a_rule_on_isolated_margin(tmp_path):
+    zigzag(tmp_path / "d", days=DAYS, first="2021-11-01")
+    text = SPEC.replace("rule: {signal: carry, hold: 7, top: 20, q: 0.2}",
+                        "rule: {signal: rev1, hold: 1, top: 12, q: 0.2, isolated: 0.05}").replace(
+        "variants:\n  - {hold: 1}", "variants:\n  - {isolated: null}")  # fmt: skip
+    spec = xk.load_spec(spec_file(tmp_path, text))
+    assert spec.primary == xk.Rule("rev1", 1, 12, 0.2, 0, False, 0.05)
+    assert spec.variants[1].isolated is None and spec.trials[1].isolated == 0.05
+    assert spec.primary.name.endswith(", each position on isolated margin (maintenance 5.0%)")
+    for bad in ("true", "false", "1", "-0.1", "5%"):
+        with pytest.raises(ex.ExperimentError, match="isolated is a maintenance rate"):
+            xk.load_spec(spec_file(tmp_path, text.replace("isolated: 0.05", f"isolated: {bad}")))
+    # swings of a few % a day liquidate nothing: the same as on the whole capital
+    r = xk.run(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+    assert r.table[0]["annual_pct"] == pytest.approx(r.table[1]["annual_pct"], abs=1e-9)
+    # the coin of the widest swings tripling within its hours for ten days: a short in it is
+    # liquidated, its margin lost, where on the whole capital it loses its day's move
+    from test_xsection import hourly, ms
+
+    a, h0 = 0.12, ms("2022-06-01") // 3_600_000
+
+    def price(h):
+        return 10 * np.exp(a * (-1.0) ** (h // 24 + (1 if h % 24 >= 2 else 0)))
+
+    hourly(tmp_path / "d", "C11USDT", "2021-11-01", DAYS + 1, price,
+           high=lambda h: price(h) * (3 if h0 <= h < h0 + 240 else 1))  # fmt: skip
+    r = xk.run(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+    assert r.table[0]["annual_pct"] < r.table[1]["annual_pct"] - 1
+    # the held-out run checks its hour bars first, traded at the close as it is
+    for f in (tmp_path / "d" / "um" / "klines" / "C00USDT" / "1h").glob("C00USDT-1h-2024-*.zip"):
+        f.unlink()
+    with pytest.raises(ex.ExperimentError, match="for C00USDT; nothing was computed or recorded"):
+        xk.final(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+
+
+def test_the_committed_isolated_carry_loads():
+    root = Path(__file__).resolve().parents[1] / "experiments"
+    spec = xk.load_spec(root / "012-xsection-carry-isolated.yaml")
+    assert spec.primary == xk.Rule("carry", 7, 50, 0.2, 1, True, 0.05)
+    assert spec.primary.name == ("carry, every 7 days, top 50, 20% a side, as 7 staggered "
+                                 "portfolios, traded 1 h after the close, each position on "
+                                 "isolated margin (maintenance 5.0%)")  # fmt: skip
+    assert [(v.hold, v.staggered, v.isolated) for v in spec.variants] == [
+        (7, True, 0.05), (1, False, 0.05)]  # fmt: skip
+    eleven = xk.load_spec(root / "011-xsection-carry-forward.yaml")
+    assert spec.trials[1] == eleven.primary  # 011 itself among the trials
+    assert len(spec.trials) == 10 and sum(t.isolated is None for t in spec.trials) == 8
+    assert (spec.holdout_first, spec.holdout_last) == (eleven.holdout_first, eleven.holdout_last)
+    assert spec.min_dsr is None and spec.min_positive_years == 2 and spec.max_abs_beta == 0.3

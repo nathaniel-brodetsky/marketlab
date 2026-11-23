@@ -331,9 +331,10 @@ def test_the_command_explains(tmp_path, capsys):
                  "2021-10-31", "--explain", "nothing:1"]) == 2  # fmt: skip
 
 
-def hourly(root, sym, first_day: str, days: int, price) -> None:
+def hourly(root, sym, first_day: str, days: int, price, high=None, low=None) -> None:
     """Monthly hour-bar archives, as Binance publishes them (no header): `price(hour)` is
-    each bar's open, `hour` counted from the epoch."""
+    each bar's open and close, `high(hour)` and `low(hour)` its extremes (the open without
+    them), `hour` counted from the epoch."""
     import io
     import zipfile
 
@@ -343,7 +344,9 @@ def hourly(root, sym, first_day: str, days: int, price) -> None:
         t = h * 3_600_000
         month = dt.datetime.fromtimestamp(t / 1000, dt.UTC).strftime("%Y-%m")
         o = price(h)
-        by_month.setdefault(month, []).append(f"{t},{o},{o},{o},{o},1,{t + 3_599_999},1,1,1,1,0")
+        hi, lo = (high or price)(h), (low or price)(h)
+        by_month.setdefault(month, []).append(
+            f"{t},{o},{hi},{lo},{o},1,{t + 3_599_999},1,1,1,1,0")  # fmt: skip
     folder = root / "um" / "klines" / sym / "1h"
     folder.mkdir(parents=True, exist_ok=True)
     for month, rows in by_month.items():
@@ -473,3 +476,82 @@ def test_the_command_runs_staggered(tmp_path, capsys):
     assert row and row[0] not in plain  # the weekly rows change
     same = [x for x in out.splitlines() if "│ rev1" in x]
     assert same and same[0] in plain  # the daily ones do not
+
+
+def test_the_hour_bars_give_each_days_highest_and_lowest(tmp_path):
+    # flat at 10 but for a spike to 25 at 05:00 on Jan 4 and a dip to 4 at 00:00 on Jan 6
+    write(tmp_path, "AAAUSDT", "2021-01-01", np.full(10, 10.0), np.full(10, 1e6))
+    spike, dip = ms("2021-01-04") // 3_600_000 + 5, ms("2021-01-06") // 3_600_000
+    hourly(tmp_path, "AAAUSDT", "2021-01-01", 11, lambda h: 10.0,
+           high=lambda h: 25.0 if h == spike else 10.0,
+           low=lambda h: 4.0 if h == dip else 10.0)  # fmt: skip
+    p = xs.load(tmp_path, "2021-01-05", "2021-01-08")
+    lag = xs.lagged(p, tmp_path, [0, 1])
+    day = {d: p.dates.index(d) for d in ("2021-01-03", "2021-01-04", "2021-01-05", "2021-01-06")}
+    for L in (0, 1):
+        assert lag[L].up[day["2021-01-04"], 0] == pytest.approx(1.5)  # 25 over 10, less 1
+        assert lag[L].up[day["2021-01-03"], 0] == 0 and lag[L].up[day["2021-01-05"], 0] == 0
+    # the dip's hour opens Jan 6: traded at the close, Jan 6's span; an hour after, Jan 5's
+    assert lag[0].down[day["2021-01-06"], 0] == pytest.approx(0.6)
+    assert lag[0].down[day["2021-01-05"], 0] == 0
+    assert lag[1].down[day["2021-01-05"], 0] == pytest.approx(0.6)
+    assert lag[1].down[day["2021-01-06"], 0] == 0
+    assert np.isnan(lag[1].up[: p.dates.index("2021-01-01"), 0]).all()  # no bars, no price
+
+
+def margin_case(n=12):
+    """Ten coins ranked 0 .. 9 every day: long 8 and 9, short 0 and 1, a quarter each."""
+    x = np.tile(np.arange(10.0), (n, 1))
+    z = np.zeros((n, 10))
+    return x, np.ones_like(x, dtype=bool), z.copy(), z.copy(), z.copy()
+
+
+def test_on_isolated_margin_a_position_loses_its_margin_and_no_more():
+    x, inu, r, up, down = margin_case()
+    r[2, 0], up[2, 0] = 1.5, 1.5  # the short 0 up 150% on day 2: its margin gone
+    r[3, 0] = 0.5  # and on up the next day, held no more
+    r[4, 9], down[4, 9] = -0.5, 0.5  # the long 9 halved: half its margin left
+    r[5, 9], down[5, 9] = -0.4, 0.97  # then 97% down within day 5, 40% at its end
+    r[5, 1], up[5, 1] = 0.1, 0.6  # the short 1 60% up within day 5: a margin left
+    r[8, 0] = 0.2  # rebalanced at day 7's close: the short 0 held again
+    r[9, 1], up[9, 1] = 1.2, np.nan  # no hour bars for the short 1 on day 9: its close, +120%,
+    # after a rebalance that gave it its whole margin back
+    m = xs.Margin(up, down, 0.05)
+    capped, turns, names = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0, margin=m)
+    plain, turns0, names0 = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0)
+    want = np.zeros(12)
+    want[[2, 3, 4, 5, 8, 9]] = [-0.25, 0.0, -0.125, -0.125 - 0.025, -0.05, -0.25]
+    assert capped == pytest.approx(want)
+    assert plain[[2, 3, 5]] == pytest.approx([-0.375, -0.125, -0.125])
+    assert turns == turns0 and names == names0
+    # the two positions liquidated are bought back at the rebalance, and pay for it
+    paid, _, _ = xs.portfolio(x, inu, r, 0, 7, 0.2, 10.0, margin=m)
+    assert capped - paid == pytest.approx(np.where(np.arange(12) == 0, 5e-4, 0)
+                                          + np.where(np.arange(12) == 7, 2.5e-4, 0))  # fmt: skip
+    # a margin rate of 50%: the short 1's 60% within the day takes it too
+    half, _, _ = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0, margin=xs.Margin(up, down, 0.5))
+    assert half[5] == pytest.approx(-0.125 - 0.25)
+
+
+def test_on_isolated_margin_without_a_liquidation_nothing_changes():
+    rng = np.random.default_rng(4)
+    x = rng.normal(size=(60, 20))
+    inu = np.ones_like(x, dtype=bool)
+    r = rng.normal(0, 0.03, x.shape)
+    up, down = np.abs(r) + 0.05, np.abs(r) + 0.05
+    m = xs.Margin(up, down, 0.05)
+    for hold, stag in ((1, False), (7, False), (7, True)):
+        a = xs.portfolio(x, inu, r, 3, hold, 0.2, 9.0, stag)
+        b = xs.portfolio(x, inu, r, 3, hold, 0.2, 9.0, stag, m)
+        assert np.allclose(a[0], b[0], rtol=0, atol=1e-15) and a[1:] == b[1:]
+
+
+def test_staggered_portfolios_are_liquidated_each_on_its_own():
+    x, inu, r, up, down = margin_case(30)
+    r[10, 0], up[10, 0] = 1.5, 1.5  # the short 0 up 150% on day 10: all seven lose it
+    r[11:18, 0] = 0.1  # and it goes on up: back in one portfolio a day, at its rebalance
+    capped, _, _ = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0, True, xs.Margin(up, down, 0.05))
+    plain, _, _ = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0, True)
+    assert capped[10] == pytest.approx(-0.25) and plain[10] == pytest.approx(-0.375)
+    assert capped[11:18] == pytest.approx(-np.arange(1, 8) / 7 * 0.25 * 0.1)
+    assert plain[11:18] == pytest.approx(np.full(7, -0.025))

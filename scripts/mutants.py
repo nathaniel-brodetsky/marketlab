@@ -1118,8 +1118,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered)",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered)",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,\n",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered,\n",
         "the hypothesis trades for free",
     ),
     (
@@ -1178,8 +1178,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "        if rule.hours == 0:",
-        "        if True:",
+        "    if rule.hours == 0 and rule.isolated is None:",
+        "    if rule.isolated is None:",
         "the hypothesis traded at the close whatever its hour",
     ),
     (
@@ -1214,8 +1214,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered)",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp)",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,\n",
+        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, False,\n",
         "a staggered hypothesis run as one portfolio",
     ),
     (
@@ -1271,6 +1271,132 @@ M = [
         "    return days[-most:]",
         "    return days",
         "the shadow catches up without end",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        for t in range(1, k):",
+        "        for t in range(2, k):",
+        "a trailing window a day short",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        out[k - 1 :] = s / k",
+        "        out[k - 1 :] = s / (k - 1)",
+        "a trailing mean over one day too few",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        s = a[:last].astype(float)",
+        "        s = np.nan_to_num(a[:last]).astype(float)",
+        "a window missing a day averaged anyway",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    if len(a) >= k:",
+        "    if len(a) > k:",
+        "data as long as the window left without a mean",
+    ),
+    (
+        "marketlab/xsection.py",
+        '        "carry": -np.round(_trailing_mean(p.funding, 7), 12),',
+        '        "carry": -_trailing_mean(p.funding, 7),',
+        "coins tied on a rate ranked by rounding",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        bar_hi[at[ok]], bar_lo[at[ok]] = hi[ok], lo[ok]",
+        "        bar_hi[at[ok]], bar_lo[at[ok]] = o[ok], o[ok]",
+        "a day's extremes taken from the opens",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            top = bar_hi[L : L + n * 24].reshape(n, 24).max(axis=1)\n            bottom = bar_lo[L : L + n * 24].reshape(n, 24).min(axis=1)",
+        "            top = bar_hi[L + 1 : L + 1 + n * 24].reshape(n, 24).max(axis=1)\n            bottom = bar_lo[L + 1 : L + 1 + n * 24].reshape(n, 24).min(axis=1)",
+        "a day's span an hour late",
+    ),
+    (
+        "marketlab/xsection.py",
+        "                        high[L] / before - 1, 1 - low[L] / before)  # fmt: skip",
+        "                        high[L] / before - 1, 1 - high[L] / before)  # fmt: skip",
+        "the lowest taken from the highs",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            traded[i] = np.abs(new - w * alive).sum()",
+        "            traded[i] = np.abs(new - w).sum()",
+        "a liquidated position bought back for free",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            w, alive, lost = new, np.ones(m, dtype=bool), np.zeros(m)",
+        "            w, lost = new, np.zeros(m)",
+        "a liquidated position out after its rebalance too",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        against = np.fmax(hours, close)",
+        "        against = np.nan_to_num(hours)",
+        "a day's close ignored for its worst price",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        out = on & (size + lost - size * against <= margin.maintenance * at_worst)",
+        "        out = on & (size + lost - size * against <= 0)",
+        "liquidated only when the margin is all gone",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        day[out] = -(size[out] + lost[out])  # what was left of its margin",
+        "        day[out] = -size[out]",
+        "a liquidation loses the whole margin again",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        lost += day\n",
+        "        pass\n",
+        "a position's losses forgotten the next day",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            held_k, _, _, _ = holdings(x, inu, start + k, hold, q)",
+        "            held_k, _, _, _ = holdings(x, inu, start, hold, q)",
+        "the staggered portfolios on margin all started the same day",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        tranches = range(hold) if staggered and hold > 1 else range(1)",
+        "        tranches = range(1)",
+        "a staggered rule on margin run as one portfolio",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        if rule.isolated is not None:\n            margin = xs.Margin(lag.up, lag.down, rule.isolated)",
+        "        if False:\n            margin = xs.Margin(lag.up, lag.down, rule.isolated)",
+        "a rule on isolated margin run on the whole capital",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    if rule.hours == 0 and rule.isolated is None:",
+        "    if rule.hours == 0:",
+        "a rule on isolated margin at the close run without its hour bars",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    if spec.primary.hours or spec.primary.isolated is not None:",
+        "    if spec.primary.hours:",
+        "the held-out run on margin without its hour bars checked",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        if iso is not None and (isinstance(iso, bool) or not isinstance(iso, int | float)",
+        "        if iso is not None and (not isinstance(iso, int | float)",
+        "false taken for a rate of 0",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        iso = d.get("isolated", base.isolated if base else None)',
+        '        iso = d.get("isolated")',
+        "a variant without the primary's margin",
     ),
 ]
 survived = []

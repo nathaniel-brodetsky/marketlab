@@ -173,16 +173,19 @@ def largest_funding(p: Panel, inu: np.ndarray, start: int, n: int = 5) -> list[d
 HOUR_MS = 3_600_000
 
 
-def _hourly_opens(root: str | Path, sym: str, held_out: bool) -> tuple[np.ndarray, np.ndarray]:
-    """(hours since the epoch, the open of the hour bar starting then) from the monthly
-    files under um/klines/<sym>/1h; a file of a month after `DEV_END`'s is not opened,
-    unless `held_out`."""
+Bars = tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+
+
+def _hourly_bars(root: str | Path, sym: str, held_out: bool) -> Bars:
+    """(hours since the epoch, and the open, high and low of the hour bar starting then) from
+    the monthly files under um/klines/<sym>/1h; a file of a month after `DEV_END`'s is not
+    opened, unless `held_out`."""
     import io
     import zipfile
 
     folder = Path(root) / "um" / "klines" / sym / "1h"
     last = DEV_END[:7]
-    hours, opens = [], []
+    hours, opens, highs, lows = [], [], [], []
     for f in sorted(folder.glob(f"{sym}-1h-*.zip")):
         if not held_out and f.stem[-7:] > last:
             continue
@@ -200,11 +203,14 @@ def _hourly_opens(root: str | Path, sym: str, held_out: bool) -> tuple[np.ndarra
         t = np.where(t > 10**14, t // 1000, t)  # µs from 2025 on, ms before
         hours.append(t // HOUR_MS)
         opens.append(raw[raw.columns[1]].cast(pl.Float64).to_numpy())
+        highs.append(raw[raw.columns[2]].cast(pl.Float64).to_numpy())
+        lows.append(raw[raw.columns[3]].cast(pl.Float64).to_numpy())
     if not hours:
-        return np.zeros(0, dtype=np.int64), np.zeros(0)
-    h, o = np.concatenate(hours), np.concatenate(opens)
+        return np.zeros(0, dtype=np.int64), np.zeros(0), np.zeros(0), np.zeros(0)
+    h = np.concatenate(hours)
     order = np.argsort(h, kind="stable")
-    return h[order], o[order]
+    return (h[order], np.concatenate(opens)[order], np.concatenate(highs)[order],
+            np.concatenate(lows)[order])  # fmt: skip
 
 
 @dataclass
@@ -216,13 +222,18 @@ class Lagged:
     hours: int
     r: np.ndarray  # days x symbols, NaN where an hour bar is missing at either end
     priced: np.ndarray  # days x symbols: an hour bar at that day's trading time
+    # over the same span, the 24 hour bars from its first price: the highest high over that
+    # price, less 1, and 1 less the lowest low over it; NaN without the price or any bar
+    up: np.ndarray | None = None
+    down: np.ndarray | None = None
 
 
 def lagged(p: Panel, root: str | Path, hours: list[int],
            held_out: bool = False) -> dict[int, Lagged]:  # fmt: skip
     """`p`'s returns traded each of `hours` (0 .. 23) after each daily close. Day `D`'s
-    close is the start of day `D + 1`; traded `hours` later, at its hour bar's open. Nothing
-    from `DEV_END`'s next day on is read, bars nor funding, unless `held_out`."""
+    close is the start of day `D + 1`; traded `hours` later, at its hour bar's open; and how
+    far each day's span went each way, from its hour bars. Nothing from `DEV_END`'s next day
+    on is read, bars nor funding, unless `held_out`."""
     if any(not 0 <= h < 24 for h in hours):
         raise ValueError("hours: from 0 to 23 after the close")
     if p.dates[-1] > DEV_END and not held_out:
@@ -232,24 +243,40 @@ def lagged(p: Panel, root: str | Path, hours: list[int],
     n, m = len(p.dates), len(p.symbols)
     price = {L: np.full((n, m), np.nan) for L in hours}
     fund = {L: np.zeros((n, m)) for L in hours}
+    high = {L: np.full((n, m), np.nan) for L in hours}
+    low = {L: np.full((n, m), np.nan) for L in hours}
     for j, sym in enumerate(p.symbols):
-        h, o = _hourly_opens(root, sym, held_out)
+        h, o, hi, lo = _hourly_bars(root, sym, held_out)
         fr = Path(root) / "um" / "fundingRate" / sym / f"{sym}-fundingRate.csv"
         rf = read_columns(fr, FUNDING_TYPES) if fr.exists() else None
         if rf is not None and not held_out:  # the last day's window reaches past DEV_END
             rf = rf.filter(pl.col("funding_time") < end_ms)
+        # the hour bars laid out from the panel's first day: hour 24 i + k is day i's k-th
+        at = h - day0 * 24
+        ok = (at >= 0) & (at < (n + 1) * 24)
+        bar_hi, bar_lo = np.full((n + 1) * 24, -np.inf), np.full((n + 1) * 24, np.inf)
+        bar_hi[at[ok]], bar_lo[at[ok]] = hi[ok], lo[ok]
         for L in hours:
             if len(h):
                 want = (day0 + 1 + np.arange(n)) * 24 + L  # day D's trading hour
                 k = np.clip(np.searchsorted(h, want), 0, len(h) - 1)
                 price[L][:, j] = np.where(h[k] == want, o[k], np.nan)
+            # day D's span, from day D - 1's trading hour to day D's: its 24 hour bars
+            top = bar_hi[L : L + n * 24].reshape(n, 24).max(axis=1)
+            bottom = bar_lo[L : L + n * 24].reshape(n, 24).min(axis=1)
+            high[L][:, j] = np.where(np.isfinite(top), top, np.nan)
+            low[L][:, j] = np.where(np.isfinite(bottom), bottom, np.nan)
             if rf is not None:
                 t = rf["funding_time"].to_numpy()
                 d = (t - L * HOUR_MS) // 86_400_000 - day0  # [D + L, D + 1 + L)
                 ok = (d >= 0) & (d < n)
                 np.add.at(fund[L][:, j], d[ok], rf["funding_rate"].to_numpy()[ok])
-    return {L: Lagged(L, price[L] / _lag(price[L], 1) - 1 - fund[L], np.isfinite(price[L]))
-            for L in hours}  # fmt: skip
+    out = {}
+    for L in hours:
+        before = _lag(price[L], 1)  # the span's first price
+        out[L] = Lagged(L, price[L] / before - 1 - fund[L], np.isfinite(price[L]),
+                        high[L] / before - 1, 1 - low[L] / before)  # fmt: skip
+    return out
 
 
 def at_hours(p: Panel, root: str | Path, rules: list[tuple[str, int]], hours: list[int],
@@ -406,11 +433,68 @@ def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
     return held, traded, turns, names
 
 
+@dataclass
+class Margin:
+    """Each position on isolated margin of its own size, as it is opened at a rebalance: a
+    loss takes from that margin and nothing else, and a position whose margin falls to the
+    `maintenance` rate of its size at the day's worst price (from the hour bars) is
+    liquidated, its whole margin lost, and holds nothing until its portfolio's next
+    rebalance. Between rebalances a position is held at its weight, as without. The day's
+    worst price is its hour bars' extreme, or its close where that is worse (or there are
+    no hour bars)."""
+
+    up: np.ndarray  # days x symbols: as Lagged.up, over the day each return spans
+    down: np.ndarray  # as Lagged.down
+    maintenance: float  # of the position's size at that price
+
+
+def _isolated(held: np.ndarray, r: np.ndarray, start: int, hold: int,
+              margin: Margin) -> tuple[np.ndarray, np.ndarray]:  # fmt: skip
+    """One portfolio's `held` (rebalanced every `hold` days from `start`) on isolated margin:
+    its return each day and the weight it traded."""
+    n, m = held.shape
+    pnl, traded = np.zeros(n), np.zeros(n)
+    w, alive, lost = np.zeros(m), np.ones(m, dtype=bool), np.zeros(m)
+    for i in range(start, n - 1):
+        if (i - start) % hold == 0:
+            new = held[i + 1]
+            traded[i] = np.abs(new - w * alive).sum()
+            w, alive, lost = new, np.ones(m, dtype=bool), np.zeros(m)
+        size = np.abs(w)
+        on = alive & (w != 0)
+        day = np.where(on, w * r[i + 1], 0.0)
+        # the day's worst move against the position: its hour bars' extreme, or its close's
+        hours = np.where(w > 0, margin.down[i + 1], margin.up[i + 1])
+        close = np.maximum(np.where(w > 0, -r[i + 1], r[i + 1]), 0.0)
+        against = np.fmax(hours, close)
+        at_worst = size * (1 + np.where(w > 0, -against, against))  # the position's size then
+        out = on & (size + lost - size * against <= margin.maintenance * at_worst)
+        day[out] = -(size[out] + lost[out])  # what was left of its margin
+        alive &= ~out
+        lost += day
+        pnl[i + 1] = day.sum()
+    return pnl, traded
+
+
+Pnl = tuple[np.ndarray, list[float], list[int]]
+
+
 def portfolio(x: np.ndarray, inu: np.ndarray, r: np.ndarray, start: int, hold: int, q: float,
-              cost_bp: float,
-              staggered: bool = False) -> tuple[np.ndarray, list[float], list[int]]:  # fmt: skip
+              cost_bp: float, staggered: bool = False,
+              margin: Margin | None = None) -> Pnl:  # fmt: skip
     """The long-short portfolio's return each day (costs on the day of the rebalance), the
-    weight traded at each rebalance, and the positions a side."""
+    weight traded at each rebalance, and the positions a side; with `margin`, each position
+    on isolated margin of its size (`Margin`), each staggered portfolio on its own."""
+    if margin is not None:
+        rr = np.nan_to_num(r)
+        tranches = range(hold) if staggered and hold > 1 else range(1)
+        _, _, turns, names = holdings(x, inu, start, hold, q, staggered)
+        pnl, traded = np.zeros(len(r)), np.zeros(len(r))
+        for k in tranches:
+            held_k, _, _, _ = holdings(x, inu, start + k, hold, q)
+            pk, tk = _isolated(held_k, rr, start + k, hold, margin)
+            pnl, traded = pnl + pk / len(tranches), traded + tk / len(tranches)
+        return pnl - traded * cost_bp / 2 / 1e4, turns, names
     held, traded, turns, names = holdings(x, inu, start, hold, q, staggered)
     pnl = (held * np.nan_to_num(r)).sum(axis=1) - traded * cost_bp / 2 / 1e4
     return pnl, turns, names

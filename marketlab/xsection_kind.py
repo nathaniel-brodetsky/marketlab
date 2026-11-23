@@ -6,7 +6,9 @@ The rule: each UTC day, the `top` perpetuals by mean quote volume over 30 days (
 with a close on that day and 30 days before); long those strictly above the signal's
 `1 - q` quantile, short those strictly below its `q` quantile, half the capital a side,
 equal weights, rebalanced every `hold` days at the day's close; `round_trip_bp` on every
-unit of weight traded, the funding paid or received in the P&L.
+unit of weight traded, the funding paid or received in the P&L. It may be traded `hours`
+after the close, held as `hold` staggered portfolios, and hold each position on isolated
+margin of its own size (`isolated`, the maintenance rate: `xsection.Margin`).
 
 The development run scores the primary and its variants on the development days: the
 daily net, in bp of the capital, tested for a mean above zero with Newey-West errors and
@@ -47,13 +49,18 @@ class Rule:
     q: float  # the share of the universe a side
     hours: int = 0  # traded this long after the daily close, from hourly bars
     staggered: bool = False  # held `hold` days as `hold` portfolios, one rebalanced a day
+    # each position on isolated margin of its size, liquidated at this maintenance rate
+    # (xsection.Margin), from hourly bars; None: on the whole capital, as a portfolio
+    isolated: float | None = None
 
     @property
     def name(self) -> str:
         late = f", traded {self.hours} h after the close" if self.hours else ""
         tranches = f", as {self.hold} staggered portfolios" if self.staggered else ""
+        margin = (f", each position on isolated margin (maintenance {self.isolated:.1%})"
+                  if self.isolated is not None else "")  # fmt: skip
         return (f"{self.signal}, every {self.hold} days, top {self.top}, {self.q:.0%} a side"
-                + tranches + late)  # fmt: skip
+                + tranches + late + margin)  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -120,8 +127,15 @@ def load_spec(path: str | Path) -> Spec:
         stag = get("staggered", False)
         if not isinstance(stag, bool):
             raise ex.ExperimentError(f"{path}: staggered is true or false, not {stag!r}")
+        # isolated: a maintenance rate, or null (in a variant: the primary's off)
+        iso = d.get("isolated", base.isolated if base else None)
+        if iso is not None and (isinstance(iso, bool) or not isinstance(iso, int | float)
+                                or not 0 <= iso < 1):  # fmt: skip
+            raise ex.ExperimentError(f"{path}: isolated is a maintenance rate from 0 to 1 "
+                                     f"(0.05 for 5%), or null; not {iso!r}")  # fmt: skip
         r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
-                 int(get("hours", 0)), stag and int(get("hold")) > 1)  # fmt: skip
+                 int(get("hours", 0)), stag and int(get("hold")) > 1,
+                 None if iso is None else float(iso))  # fmt: skip
         if r.signal not in xs.SIGNALS:
             raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of {xs.SIGNALS}")
         if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
@@ -185,21 +199,29 @@ MIN_PRICED = 0.98
 def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
            root: str | Path | None = None, held_out: bool = False) -> Days:  # fmt: skip
     """The rule from `first` to the panel's last day; `cache` keeps what rules share. A rule
-    traded hours after the close reads the hour bars under `root`."""
+    traded hours after the close, or on isolated margin, reads the hour bars under `root`."""
     if rule.top not in cache:
         cache[rule.top] = xs.universe(p, rule.top)
     if "x" not in cache:
         cache["x"] = xs.signals(p)
-    key = ("r", rule.hours)
-    if key not in cache:
-        if rule.hours == 0:
-            cache[key] = xs.daily_returns(p)
-        else:
-            cache[key] = xs.lagged(p, root, [rule.hours], held_out)[rule.hours].r
-    inu, r, x = cache[rule.top], cache[key], cache["x"][rule.signal]
+    margin = None
+    if rule.hours == 0 and rule.isolated is None:
+        if "r0" not in cache:
+            cache["r0"] = xs.daily_returns(p)
+        r = cache["r0"]
+    else:
+        key = ("lag", rule.hours)
+        if key not in cache:
+            cache[key] = xs.lagged(p, root, [rule.hours], held_out)[rule.hours]
+        lag = cache[key]
+        r = lag.r
+        if rule.isolated is not None:
+            margin = xs.Margin(lag.up, lag.down, rule.isolated)
+    inu, x = cache[rule.top], cache["x"][rule.signal]
     start = p.dates.index(first)
-    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered)
-    gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered)
+    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,
+                                 margin)  # fmt: skip
+    gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered, margin)
     held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)
     on = held[start:] != 0
     mkt = xs.market(inu, r, start)
@@ -371,11 +393,12 @@ def final(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | Non
     if not p.symbols or not np.isfinite(p.close[p.dates.index(spec.holdout_first) :]).any():
         raise ex.ExperimentError("no daily bars in the held-out period")
     cache: dict = {}
-    if spec.primary.hours:  # the hour bars there first, or nothing is computed
+    # the hour bars there first, or nothing is computed
+    if spec.primary.hours or spec.primary.isolated is not None:
         h, start = spec.primary.hours, p.dates.index(spec.holdout_first)
         inu = cache[spec.primary.top] = xs.universe(p, spec.primary.top)
         lag = xs.lagged(p, root, [h], held_out=True)[h]
-        cache[("r", h)] = lag.r
+        cache[("lag", h)] = lag
         need = inu[start:-1]
         got = lag.priced[start:-1] & lag.priced[start + 1 :]
         share = float(got[need].mean()) if need.any() else 0.0

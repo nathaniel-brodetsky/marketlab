@@ -1,0 +1,88 @@
+# Written on 2026-11-23, before any of its held-out days exist: they are the two years from
+# 2026-12-01, tested forward, the same as 011's. Everything up to 2026-10-31 has been seen
+# [backtest, the 678 perpetuals on coins, those gone from Binance's list included, 9 bp a
+# round trip, after the fix of 2026-11-22 that ranks coins tied on a funding rate alike
+# wherever the data begin]:
+#
+# - 011's rule (carry, 7 staggered portfolios), traded at the close: development 2020 ..
+#   2023 +29.2% a year, Sharpe from months 1.34; 2024 .. 2026 +27.4%, Sharpe 0.73, p 0.126,
+#   worst drawdown 42.5%. Days up 51% and 52%; a day's spread 1.16% before 2024 and 2.11%
+#   after, its mean about the same (+0.08%): the same edge in twice the noise.
+# - That noise is a few coins: a short in MYX lost 18.6% of the capital in a day (up 301%),
+#   a long in ALPACA made 18.7% (up 505%); without the 5 best and 5 worst coins it made
+#   +69% of its +80% summed over 2024 .. 2026.
+# - A position that loses at most its own weight over a holding, judged on daily closes
+#   (scratch, at the close): development +30.5% a year, Sharpe 1.40; 2024 .. 2026 +47.2%,
+#   Sharpe 1.35, p 0.013, worst drawdown 31.0%. Written after seeing the squeezes it cuts,
+#   so those years show nothing; only days no one has seen can. Weights in inverse
+#   proportion to volatility, with and without the cap, were looked at too and were worse
+#   on both periods (+24.1% and +25.2% a year developing); the code here cannot run them,
+#   so they are named here and not among the trials below.
+#
+# So this is 011 as it could be traded with a floor under each position: each on isolated
+# margin of its own size, so that a squeeze takes that margin and no more. Its decisions are
+# 011's, which the shadow records; how each position is margined is all that differs, and
+# the held-out run judges it from the hour bars. Next to 011 after 2028-11-30 it says what the
+# floor is worth; on its own, as 011, whether the carry pays. Not confirmed will mean not
+# shown, not absent.
+id: "012"
+name: xsection-carry-isolated
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, long those whose mean funding a day over the last 7 days is lowest (strictly
+  in the bottom 20%), short those whose is highest (strictly in the top 20%), half the
+  capital a side in equal weights, held 7 days as seven staggered portfolios with a seventh
+  of the capital each, one rebalanced every day, decided at the daily close and traded one
+  hour later; each position on isolated margin of its own size, liquidated (its margin lost,
+  nothing held until its portfolio's next rebalance) when that margin falls to 5% of its
+  size at the day's worst price from the hour bars; paying 9 bp a round trip on every unit
+  traded and the funding as settled: its daily net is above zero over 2026-12-01 ..
+  2028-11-30.
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: carry           # minus the mean of the daily funding sums over the last 7 days
+  hold: 7                 # days each portfolio is held
+  staggered: true         # seven of them, one rebalanced each day
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # a side
+  hours: 1                # traded this long after the daily close
+  isolated: 0.05          # each position on isolated margin of its size; maintenance 5%,
+                          # above what Binance asks of a small position in most coins: a
+                          # liquidation comes sooner here than there
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 1}
+
+trials:                   # the rules looked at before it was written, traded at the same hour
+  - {isolated: null}      # 011
+  - {hold: 1, isolated: null}
+  - {signal: mom7, hold: 1, isolated: null}
+  - {signal: mom7, isolated: null}
+  - {signal: mom30, hold: 1, isolated: null}
+  - {signal: mom30, isolated: null}
+  - {signal: rev1, hold: 1, isolated: null}
+  - {hours: 0}            # the scratch look: capped, at the close
+  - {hours: 0, isolated: null}
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20). Staggered portfolios
+# trading one coin the same day are not netted: an upper bound. A liquidation pays nothing
+# more: its whole margin is already lost.
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 10 trials is reported, not a bar, as for 011
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)

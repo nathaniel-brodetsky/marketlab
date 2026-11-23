@@ -444,7 +444,10 @@ shift, PBO that picks with hindsight, Bonferroni in place of Benjamini-Hochberg,
 and one for the bars, thresholds taken from totals instead of counted: 59. The later
 stages (point processes, the maker probe, the strategy and its gate, the archives, the
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
-it is compared with and a taker filled with no latency: 210 in all, each caught.
+it is compared with and a taker filled with no latency; and the cross-section's, among them
+coins tied on a rate ranked by rounding, a day's span an hour late, a liquidated position
+bought back for free and one whose losses are forgotten the next day: 231 in all, each
+caught.
 
 ## Numbers
 
@@ -631,11 +634,30 @@ short of them, before computing or recording anything.
 momentum over 7 days, rebalanced daily, traded an hour after the close (an hour one can
 trade at, not the best of the hours looked at), the same universe, sides, costs, held-out
 period and bars as 009.
+`experiments/011-xsection-carry-forward.yaml` is 009's carry as seven staggered portfolios
+(below), traded an hour after the close, tested forward: its held-out period is the two
+years from 2026-12-01. `experiments/012-xsection-carry-isolated.yaml` is 011 with each
+position on isolated margin of its own size (`isolated: 0.05`, `xsection.Margin`), so that
+a coin squeezed against it takes that margin and nothing more: a position whose margin,
+after what it has lost since its rebalance, falls to 5% of its size at the day's worst
+price (the extreme of the day's 24 hour bars from its trading hour, or its close where that
+is worse) is liquidated, all its margin lost, and holds nothing until its portfolio's next
+rebalance, which buys it back and pays for it. Between rebalances a position is held at its
+weight, as without; each staggered portfolio is margined on its own. Its decisions are
+011's; the held-out run reads the hour bars for its extremes, and stops without them as a
+rule traded hours after the close does. Written over the same two years as 011, it says
+next to it what the floor is worth.
 `tests/test_xsection_kind.py` passes a planted carry and confirms it once, fails one where
 the funding does not last, shows the development run unchanged when the held-out prices
 are, makes the same Sharpe ratio worth less against trials that differ more, trades a rule
 hours after the close (and its held-out run stops without its hour bars, recording
-nothing), and runs it all through the command.
+nothing), runs a rule on isolated margin, the same as without where nothing is liquidated
+and losing a squeezed short's margin where something is, and runs it all through the
+command. `tests/test_xsection.py` works the hour bars' extremes and the liquidations out by
+hand: a short up 150% in a day loses its margin and no more, a long halved and then down
+97% within a day loses what was left, a position without hour bars is judged on its close,
+a rebalance buys the liquidated back and pays for it, and seven staggered portfolios
+liquidated the same day are back in one a day.
 
 ### The shadow
 
@@ -676,7 +698,8 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 008 funding carry, spot against the perpetual | passed, held out confirmed | 13.9% a year of the notional 2020 .. 2023 (16.6, 29.8, 2.1, 6.9 by year), 6.0% over January 2024 .. October 2026; holding always 6.9% |
 | 009 funding carry across coins | passed on development (deflated Sharpe 0.50, reported); held out confirmed, p 0.0499, but by its rebalance day's luck (below) | +36.4% a year 2020 .. 2023, Sharpe from months 1.42; held out +46.7% (Sharpe 1.16, worst drawdown 50.5%), the other six days of the week from +4.7% to +56.3% |
 | 010 momentum across coins, an hour after the close | failed on development: PBO 0.55 over its 3 variants; its held-out period informs, decides nothing | +50.5% a year 2020 .. 2023, Sharpe from months 1.40, p after BH 0.004 |
-| 011 funding carry across coins, staggered, an hour after the close | written; held out forward, 2026-12-01 .. 2028-11-30, recorded day by day by the shadow | |
+| 011 funding carry across coins, staggered, an hour after the close | passed on development (PBO 0.03, deflated Sharpe 0.76, reported); held out forward, 2026-12-01 .. 2028-11-30, recorded day by day by the shadow | at the close, +29.2% a year 2020 .. 2023 (Sharpe from months 1.34), +27.4% 2024 .. 2026 (0.73, p 0.126, worst drawdown 42.5%) |
+| 012 the same, each position on isolated margin | written; held out forward over the same two years | |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
@@ -695,6 +718,30 @@ not distinguishably from noise over 34 months, and its verdict was set by the da
 happened to start on. The verdict stays as recorded; the lesson goes into the next
 hypothesis: a rule held for several days is run as that many staggered portfolios, one
 rebalanced each day, so that no start day decides it.
+
+A fix of 2026-11-22: the trailing means (a coin's funding over 7 days, its volume over 30)
+were differences of a running sum, whose rounding carried everything summed before it, so
+that a coin's carry differed in its last bits (about 3e-17) with the first day loaded. Many
+coins sit on Binance's default funding rate, tied at the 20% cut, and those bits picked
+which of them got in: 011's rule at the close over 2024 .. 2026 made +28.3% a year loaded
+from 2024 and +26.5% loaded from 2020 [backtest], and the shadow, loading a few weeks back,
+would not have held what a final run holds. Each window is now summed on its own and carry
+rounded at 1e-12, where no two rates differ: rates tied in any order tie exactly, and a tie
+at the cut is left out, as the rules say. Run again on the development years: 009 passed
+(PBO 0.16, deflated Sharpe 0.38), 010 failed as before (PBO 0.55), 011 passed (PBO 0.03,
+deflated Sharpe 0.76, p after Benjamini-Hochberg 0.0148); 011's rule at the close, +29.2% a
+year (it was +31.7%). 009's held-out record was computed before the fix and stays as it was
+opened.
+
+The carry's days, at the close [backtest]: up on 51% of them before 2024 and 52% after, a
+day's mean about +0.08% in both, its spread 1.16% and then 2.11%. The same edge in twice the
+noise, and the noise is a few coins squeezed: a short in MYXUSDT lost 18.6% of the capital
+in a day (up 301%), a long in ALPACAUSDT made 18.7% (up 505%); without its 5 best and 5
+worst coins the rule made +69% of its +80% summed over 2024 .. 2026 (counted before the
+fix). Its gains came in
+spells (late 2020 into 2021, November 2024 into January 2025), with years between them
+nearly flat: two years forward can fall on a flat one, which is why not confirmed will mean
+not shown.
 
 Erratum: the comment in `experiments/007-flow-beats-cost.yaml` calls the days of
 Tardis.dev's recording futures days. They are Binance spot BTCUSDT. The hypothesis is left
