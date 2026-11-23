@@ -4,7 +4,7 @@
 # account, no order. From cron, for one (Fedora's cronie reads CRON_TZ):
 #
 #   CRON_TZ=UTC
-#   40 0 * * *  $HOME/projects/marketlab/scripts/shadow_daily.sh experiments/011-name.yaml
+#   10 0 * * *  $HOME/projects/marketlab/scripts/shadow_daily.sh experiments/011-name.yaml
 #
 # The data go to binance-data/, the decisions to shadow/<id-name>.csv, the logs to runs/.
 # A day the machine was off is caught up the next time it runs (--catch-up), each decision

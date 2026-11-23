@@ -652,7 +652,7 @@ rule held for several days and not staggered rebalances on the days its held-out
 first day sets, as its held-out run does. `--catch-up` also records every close since
 the last one recorded (31 at most), each from the data up to its own close, the time it
 was decided written next to it: a machine that was off catches up. `scripts/shadow_daily.sh
-SPEC ...`, from cron or the systemd user timer in `scripts/systemd/` (00:40 UTC, run at the
+SPEC ...`, from cron or the systemd user timer in `scripts/systemd/` (00:10 UTC, run at the
 next start if the machine was off), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
 `--end` of today, whose bar Binance serves while it is still open and which would stay so)
 and records the decisions. `tests/test_shadow.py` checks a decision against what the
