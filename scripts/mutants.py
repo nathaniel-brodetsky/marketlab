@@ -1082,8 +1082,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    p = xs.load(root, spec.first, spec.last)",
-        "    p = xs.load(root, spec.first, spec.holdout_last, held_out=True)",
+        "                spec.last)  # fmt: skip\n    if not p.symbols:",
+        "                spec.holdout_last, held_out=True)  # fmt: skip\n    if not p.symbols:",
         "the cross-section's development run reads the held-out days",
     ),
     (
@@ -1649,6 +1649,72 @@ M = [
         "    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered, rule.long)",
         "    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)",
         "the shadow records the picked longs for the rest's rule",
+    ),
+    (
+        "marketlab/trend.py",
+        "                s += np.sign(lc[i, c] - lc[i - n, c])",
+        "                s += np.sign(lc[i - n, c] - lc[i, c])",
+        "a trend against its own direction",
+    ),
+    (
+        "marketlab/trend.py",
+        "            if i - n >= 0 and np.isfinite(lc[i - n, c]):",
+        "            if np.isfinite(lc[i - n, c]):",
+        "a lookback before the data read from their end",
+    ),
+    (
+        "marketlab/trend.py",
+        "        x = s / len(lookbacks) / len(cols)",
+        "        x = s / len(lookbacks)",
+        "each coin of a trend on the whole capital",
+    ),
+    (
+        "marketlab/trend.py",
+        "            x = x * min(target / v, 1.0) if np.isfinite(v) and v > 0 else 0.0",
+        "            x = x * target / v if np.isfinite(v) and v > 0 else 0.0",
+        "a coin sized to its volatility with leverage",
+    ),
+    (
+        "marketlab/trend.py",
+        "    return np.sqrt(xs._trailing_mean(lr**2, window) * 365)",
+        "    return np.sqrt(xs._trailing_mean(lr**2, window) * 252)",
+        "a coin's volatility over 252 days a year",
+    ),
+    (
+        "marketlab/trend.py",
+        "        traded[i] = np.abs(held[i + 1] - held[i]).sum()",
+        "        traded[i] = np.abs(np.sign(held[i + 1]) - np.sign(held[i])).sum() / 2",
+        "a trend's resizing paid nothing",
+    ),
+    (
+        "marketlab/trend.py",
+        "    for i in range(start, n - 1):\n        held[i + 1] = decide(",
+        "    for i in range(start - 1, n - 1):\n        held[i + 1] = decide(",
+        "a trend holding over its period's first day",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '    return max((max(r.lookbacks) + r.window + 10 for r in rules if r.signal == "trend"),',
+        '    return max((r.window + 10 for r in rules if r.signal == "trend"),',
+        "a trend's held-out run without the days its lookbacks need",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    pnl = gross - traded * cost_bp / 2 / 1e4\n    on = held[start:] != 0",
+        "    pnl = gross + 0 * traded\n    on = held[start:] != 0",
+        "a trend trading for free",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        if int(get("hold")) != 1 or stag or iso is not None or cut is not None or hrs \\',
+        "        if stag or iso is not None or cut is not None or hrs \\",
+        "a trend held several days taken",
+    ),
+    (
+        "marketlab/shadow.py",
+        "        cols = [p.symbols.index(c) for c in rule.coins]",
+        "        cols = [p.symbols.index(c) for c in rule.coins[:1]]",
+        "the shadow records one coin of a trend",
     ),
 ]
 survived = []

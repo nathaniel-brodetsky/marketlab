@@ -1,0 +1,86 @@
+# Written on 2026-11-23. Its held-out days are the two years from 2026-12-01, tested
+# forward as 011's to 015's, none of them existing yet. Everything up to 2026-10-31 has been seen.
+#
+# A rough look at the development years only (2020 .. 2023, nothing after them read) tried
+# strategies besides the carry [backtest; Sharpe from months; correlation with 011's daily net]:
+# a trend on the sign of the last N days, BTC and ETH, the whole capital, at the close:
+#
+#                          20 days       60 days       120 days      20, 60, 120 together
+#   BTC                    +46.6% 0.94   +46.4% 0.78   +46.9% 0.77   +46.7% 1.02 (dd 48.9%)
+#   BTC, ETH               +42.5% 0.73   +38.9% 0.58   +64.7% 1.11   +48.8% 0.97 (dd 55.1%)
+#
+# and then, the three together, traded an hour after the close as 011 is:
+#
+#                          the whole capital        each coin to 20%        the book to 20%
+#   BTC                    +46.1% 1.00 dd 49.0%     +19.1% 1.12 dd 15.5%    +36.1% 1.31 dd 22.5%
+#   BTC, ETH               +49.1% 0.97 dd 56.1%     +17.0% 1.10 dd 16.1%    +28.3% 1.24 dd 23.3%
+#
+# every one of them correlated with 011 at -0.05 .. -0.14; half in 011 and half in one of the
+# sized ones, Sharpe 1.44 .. 1.71 where 011 alone was 1.27. The primary below is the one a
+# textbook would take before looking (each coin held to a volatility, no lookback chosen, no
+# leverage), not the best of those looked at; deflated against the trials below. Not counted
+# there, as the code cannot run them: long-or-flat on BTC (3), a day late (2), the 10 coins
+# with the most volume (5), the book to 20% (2), the four halves with 011, and the other
+# strategies of the same look (new listings short, 9; funding between Binance and Bybit, 3).
+#
+# 016 and 017 are one rule over two periods, written together before either was opened;
+# the shadow records 017's decisions from 2026-12-01.
+id: "017"
+name: trend-btc-eth-forward
+hypothesis: >
+  Each UTC day, the BTCUSDT and ETHUSDT perpetuals, half the capital each, each long or short
+  by the mean of the signs of its moves over the last 20, 60 and 120 days and scaled to 20% a
+  year over its volatility of the last 30 days (never more than its half), decided at the
+  daily close and traded one hour later; paying 9 bp a round trip on every unit traded,
+  resizing included, and the funding as settled: its daily net is above zero over 2026-12-01 .. 2028-11-30.
+
+kind: xsection
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: trend           # each coin long or short by the mean of its signs (marketlab.trend)
+  coins: [BTCUSDT, ETHUSDT]   # half the capital each
+  lookbacks: [20, 60, 120]    # days: no lookback chosen, the three averaged
+  size: coin              # each coin scaled to `target` over its volatility, at most its half
+  target: 0.2             # annualized
+  window: 30              # days its volatility is taken over (daily log returns)
+  hold: 1                 # decided at every close
+  hours: 1                # traded this long after the daily close
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {coins: [BTCUSDT]}
+
+trials:                   # the rules looked at that the code can run
+  - {size: whole}                                         # the whole capital, an hour after
+  - {coins: [BTCUSDT]}
+  - {coins: [BTCUSDT], size: whole}
+  - {hours: 0, size: whole}                               # at the close, as more2.py
+  - {hours: 0, size: whole, lookbacks: [20]}
+  - {hours: 0, size: whole, lookbacks: [60]}
+  - {hours: 0, size: whole, lookbacks: [120]}
+  - {hours: 0, size: whole, coins: [BTCUSDT]}
+  - {hours: 0, size: whole, coins: [BTCUSDT], lookbacks: [20]}
+  - {hours: 0, size: whole, coins: [BTCUSDT], lookbacks: [60]}
+  - {hours: 0, size: whole, coins: [BTCUSDT], lookbacks: [120]}
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20), on every unit traded,
+# a coin resized to its volatility included.
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 12 trials is reported, not a bar
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  # a trend takes the market's side by design: its beta is reported, and only one beyond 1,
+  # more than the coins themselves, fails it
+  max_abs_beta: 1.0

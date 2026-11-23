@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import trend as tr
 from . import xsection as xs
 from . import xsection_kind as xk
 
@@ -50,7 +51,8 @@ def decide(root: str | Path, spec: xk.Spec, close: str, today: str | None = None
     if close >= today:
         raise NotReady(f"the close of {close} is not over yet (today is {today}, UTC)")
     rule = spec.primary
-    first = (dt.date.fromisoformat(close) - dt.timedelta(days=4 * rule.hold + 10)).isoformat()
+    back = max(4 * rule.hold + 10, xk.history([rule]))
+    first = (dt.date.fromisoformat(close) - dt.timedelta(days=back)).isoformat()
     p = xs.load(root, first, close, held_out=True)  # decisions only: no return is computed
     last = len(p.dates) - 1
     had, has = np.isfinite(p.close[last - 1]), np.isfinite(p.close[last])
@@ -63,8 +65,21 @@ def decide(root: str | Path, spec: xk.Spec, close: str, today: str | None = None
             + f"{missing:.0%} of the perpetuals with one the day before have none "
             f"(scripts/fetch_universe.py --end {close})"
         )
-    x = xs.signals(p)[rule.signal]
     inu = xs.universe(p, rule.top)
+    trade = dt.datetime.fromisoformat(close).replace(tzinfo=dt.UTC) + dt.timedelta(
+        days=1, hours=rule.hours
+    )
+    if rule.signal == "trend":  # a few coins, every day: its weights at this close
+        missing = [c for c in rule.coins if c not in p.symbols]
+        if missing:
+            raise NotReady(f"no daily bars for {', '.join(missing)}")
+        cols = [p.symbols.index(c) for c in rule.coins]
+        w = tr.decide(p, cols, rule.lookbacks, rule.size, rule.target,
+                      tr.volatility(p, rule.window), last)  # fmt: skip
+        return Decision(close, trade.isoformat(timespec="minutes"),
+                        {p.symbols[j]: float(w[j]) for j in np.flatnonzero(w)},
+                        int(inu[last].sum()))  # fmt: skip
+    x = xs.signals(p)[rule.signal]
     # one more row, so that the close of the last day decides the day after it
     x = np.vstack([x, np.full((1, x.shape[1]), np.nan)])
     inu = np.vstack([inu, np.zeros((1, inu.shape[1]), dtype=bool)])
@@ -74,9 +89,6 @@ def decide(root: str | Path, spec: xk.Spec, close: str, today: str | None = None
     start = anchor % rule.hold
     held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered, rule.long)
     w = held[last + 1]
-    trade = dt.datetime.fromisoformat(close).replace(tzinfo=dt.UTC) + dt.timedelta(
-        days=1, hours=rule.hours
-    )
     return Decision(
         close_date=close,
         trade_at=trade.isoformat(timespec="minutes"),

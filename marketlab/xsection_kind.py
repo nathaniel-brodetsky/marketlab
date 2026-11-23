@@ -14,6 +14,11 @@ capital among several hours after the close (`split`), and hold its long half in
 other coin of the universe instead of the picked ones (`long: rest`), its shorts against the
 rest of the universe.
 
+`signal: trend` is a rule of another shape on the same data: a few named `coins`, each long
+or short by the mean of its signs over `lookbacks` days (`marketlab.trend`), sized `whole`
+or each `coin` to a volatility `target`, rebalanced every day; the universe only gives the
+market its beta is reported against.
+
 The development run scores the primary and its variants on the development days: the
 daily net, in bp of the capital, tested for a mean above zero with Newey-West errors and
 adjusted with Benjamini-Hochberg over every hypothesis written; PBO over the variants by
@@ -40,6 +45,7 @@ from scipy import stats
 
 from . import __version__
 from . import experiment as ex
+from . import trend as tr
 from . import xsection as xs
 from .tradeflow import _dates
 from .validation import metrics, multiple, pbo
@@ -64,10 +70,24 @@ class Rule:
     # the long half: "picked", the coins above the 1 - q quantile; "rest", every coin of the
     # universe not shorted, equal weights (on the days the picked would have a coin a side)
     long: str = "picked"
+    # signal "trend": the coins, the lookbacks whose signs it averages, how it is sized, the
+    # volatility a coin is held to (sized "coin") and the days that volatility is taken over
+    coins: tuple[str, ...] = ()
+    lookbacks: tuple[int, ...] = ()
+    size: str = "whole"
+    target: float = 0.2
+    window: int = 30
 
     @property
     def name(self) -> str:
         late = f", traded {self.hours} h after the close" if self.hours else ""
+        if self.signal == "trend":
+            on = ", ".join(c.removesuffix("USDT") for c in self.coins)
+            days = ", ".join(str(n) for n in self.lookbacks[:-1])
+            days = f"{days} and {self.lookbacks[-1]}" if days else str(self.lookbacks[-1])
+            sized = (f", each coin to {self.target:.0%} volatility over {self.window} days"
+                     if self.size == "coin" else ", the whole capital")  # fmt: skip
+            return f"trend on {on}, the sign of the last {days} days{sized}{late}"
         if self.split:
             at = ", ".join(str(h) for h in self.split[:-1]) + f" and {self.split[-1]}"
             late = f", its capital split evenly among {at} h after the close"
@@ -179,12 +199,48 @@ def load_spec(path: str | Path) -> Spec:
         side = d.get("long", base.long if base else "picked")
         if side not in xs.LONGS:
             raise ex.ExperimentError(f"{path}: long is one of {list(xs.LONGS)}, not {side!r}")
-        r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
+        signal = str(get("signal"))
+        trended = {k: d.get(k, getattr(base, k) if base else None)
+                   for k in ("coins", "lookbacks", "size", "target", "window")}  # fmt: skip
+        if signal == "trend":
+            coins, looks = trended["coins"], trended["lookbacks"]
+            if (not isinstance(coins, list | tuple) or not coins
+                    or not all(isinstance(c, str) and c for c in coins)
+                    or len(set(coins)) != len(coins)):  # fmt: skip
+                raise ex.ExperimentError(f"{path}: a trend's coins are a list of symbols, not "
+                                         f"{coins!r}")  # fmt: skip
+            if (not isinstance(looks, list | tuple) or not looks
+                    or not all(type(n) is int and n > 0 for n in looks)
+                    or len(set(looks)) != len(looks)):  # fmt: skip
+                raise ex.ExperimentError(f"{path}: a trend's lookbacks are different whole days "
+                                         f"above 0, not {looks!r}")  # fmt: skip
+            size = trended["size"] or "whole"
+            if size not in tr.SIZES:
+                raise ex.ExperimentError(f"{path}: size is one of {list(tr.SIZES)}, not {size!r}")
+            target = 0.2 if trended["target"] is None else trended["target"]
+            window = 30 if trended["window"] is None else trended["window"]
+            if (isinstance(target, bool) or not isinstance(target, int | float) or not target > 0
+                    or type(window) is not int or window < 2):  # fmt: skip
+                raise ex.ExperimentError(f"{path}: a trend's target is above 0 (0.2 for 20%) and "
+                                         f"its window 2 days or more")  # fmt: skip
+            if int(get("hold")) != 1 or stag or iso is not None or cut is not None or hrs \
+                    or side != "picked":  # fmt: skip
+                raise ex.ExperimentError(
+                    f"{path}: a trend is held 1 day, not staggered, on no isolated margin, "
+                    f"with no stop, no split and no long: rest")  # fmt: skip
+            extra = (tuple(coins), tuple(sorted(looks)), size, float(target), window)
+        else:
+            given = [k for k in ("coins", "lookbacks", "size", "target", "window") if k in d]
+            if given:
+                raise ex.ExperimentError(f"{path}: {', '.join(given)}: for signal trend only")
+            extra = ()
+        r = Rule(signal, int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
                  hrs[0] if hrs else int(get("hours", 0)), stag and int(get("hold")) > 1,
                  None if iso is None else float(iso),
-                 None if cut is None else float(cut), hrs, side)  # fmt: skip
-        if r.signal not in xs.SIGNALS:
-            raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of {xs.SIGNALS}")
+                 None if cut is None else float(cut), hrs, side, *extra)  # fmt: skip
+        if r.signal not in (*xs.SIGNALS, "trend"):
+            raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of "
+                                     f"{(*xs.SIGNALS, 'trend')}")  # fmt: skip
         if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
             raise ex.ExperimentError(
                 f"{path}: {r.name}: hold at least 1 day, top at least 10, q between 0 and 0.5, "
@@ -269,6 +325,8 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
     rule split among hours is the mean of itself traded at each of them."""
     if rule.top not in cache:
         cache[rule.top] = xs.universe(p, rule.top)
+    if rule.signal == "trend":
+        return _follow_trend(p, rule, p.dates.index(first), cost_bp, cache, root, held_out)
     if "x" not in cache:
         cache["x"] = xs.signals(p)
     stop = xs.Stop(rule.stop) if rule.stop is not None else None
@@ -289,6 +347,34 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
         priced += float(np.isfinite(r[start:])[on].mean()) if on.any() else float("nan")
     return Days(p.dates[start:], pnl[start:], gross[start:], mkt[start:],
                 float(np.mean(names)) if names else float("nan"), priced / len(hours))  # fmt: skip
+
+
+def _follow_trend(p: xs.Panel, rule: Rule, start: int, cost_bp: float, cache: dict,
+                  root: str | Path | None, held_out: bool) -> Days:  # fmt: skip
+    """A trend rule: its weights each day (`marketlab.trend`) at the returns of its hour."""
+    key = ("trend", rule.coins, rule.lookbacks, rule.size, rule.target, rule.window, start)
+    if key not in cache:
+        try:
+            cache[key] = tr.holdings(p, rule.coins, rule.lookbacks, rule.size, rule.target,
+                                     rule.window, start)  # fmt: skip
+        except ValueError as e:
+            raise ex.ExperimentError(f"{rule.name}: {e}") from None
+    held, traded = cache[key]
+    r, _ = _returns(p, rule, cache, root, held_out)
+    gross = (held * np.nan_to_num(r)).sum(axis=1)
+    pnl = gross - traded * cost_bp / 2 / 1e4
+    on = held[start:] != 0
+    priced = float(np.isfinite(r[start:])[on].mean()) if on.any() else float("nan")
+    return Days(p.dates[start:], pnl[start:], gross[start:],
+                xs.market(cache[rule.top], r, start)[start:],
+                float(on.sum(axis=1).mean()) if on.size else float("nan"), priced)  # fmt: skip
+
+
+def history(rules) -> int:
+    """The days before a period's first a trend among `rules` needs bars for: its longest
+    lookback and its volatility's window, with some to spare; 0 without a trend."""
+    return max((max(r.lookbacks) + r.window + 10 for r in rules if r.signal == "trend"),
+               default=0)  # fmt: skip
 
 
 def score(d: Days, lags: int) -> dict:
@@ -392,7 +478,9 @@ def _finish(report: Report, results: Path) -> Report:
 
 def run(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | None = None) -> Report:
     prov = prov or ex.provenance(spec.path)
-    p = xs.load(root, spec.first, spec.last)
+    back = history([*spec.variants, *spec.trials])
+    p = xs.load(root, (dt.date.fromisoformat(spec.first) - dt.timedelta(days=back)).isoformat(),
+                spec.last)  # fmt: skip
     if not p.symbols:
         why = f"no daily bars under {root}/um/klines1d"
         report = Report(spec, prov, 0, [], [], float("nan"), [], None, float("nan"),
@@ -450,7 +538,9 @@ def final(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | Non
     if not (results / f"{spec.slug}.json").exists():
         raise ex.ExperimentError(f"run {spec.slug} on the development days first")
     prov = prov or ex.provenance(spec.path)
-    p = xs.load(root, spec.holdout_first, spec.holdout_last, held_out=True)
+    back = history([spec.primary])  # a trend's lookbacks reach into the days before
+    first = (dt.date.fromisoformat(spec.holdout_first) - dt.timedelta(days=back)).isoformat()
+    p = xs.load(root, first, spec.holdout_last, held_out=True)
     if not p.symbols or not np.isfinite(p.close[p.dates.index(spec.holdout_first) :]).any():
         raise ex.ExperimentError("no daily bars in the held-out period")
     cache: dict = {}
@@ -462,6 +552,8 @@ def final(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | Non
         lag = xs.lagged(p, root, [h], held_out=True)[h]
         cache[("lag", h)] = lag
         need = inu[start:-1]
+        if spec.primary.signal == "trend":  # its coins, every day
+            need = np.isin(np.array(p.symbols), spec.primary.coins)[None, :].repeat(len(need), 0)
         got = lag.priced[start:-1] & lag.priced[start + 1 :]
         share = float(got[need].mean()) if need.any() else 0.0
         if share < MIN_PRICED:

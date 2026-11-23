@@ -6,8 +6,8 @@ is read, and judged once on days it has never seen.**
 [![ci](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml/badge.svg)](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
-![hypotheses](https://img.shields.io/badge/hypotheses-15%20written%2C%20failures%20kept-0b0b0b)
-![injected faults](https://img.shields.io/badge/injected%20faults-273%20caught-0b0b0b)
+![hypotheses](https://img.shields.io/badge/hypotheses-17%20written%2C%20failures%20kept-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-284%20caught-0b0b0b)
 
 From order books recorded tick by tick by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
@@ -48,6 +48,8 @@ on which days.
 | 013 | 011 with each position sold once it has lost its weight | passed development; tested forward to 2028-11-30 |
 | 014 | 011 with its capital split among the hour after each funding settlement | passed development; tested forward to 2028-11-30 |
 | 015 | 011's shorts against the rest of the universe | passed development; tested forward to 2028-11-30 |
+| 016 | a trend on BTC and ETH, each held to a volatility | written; held out 2024 .. 2026, opened once |
+| 017 | 016's rule tested forward | written; tested forward to 2028-11-30 |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -739,6 +741,20 @@ more than the funding they were paid, its shorts made its money), and a rough lo
 development years only, written in its file, came before it. Its shorts are 011's; the
 shadow records its longs. 011 to 015 are one carry traded five ways over the same two
 years, and their verdicts are to be read together.
+A rule may also be a trend (`signal: trend`, `marketlab/trend.py`): a few named `coins`,
+each long or short by the mean of the signs of its moves over `lookbacks` days, equal
+shares, sized to the `whole` share or each `coin` to a volatility `target` over its last
+`window` days (at most its share), decided at every close; its held-out run first reads
+the days before the period its lookbacks need, and the shadow records it as it does the
+others. `experiments/016-trend-btc-eth.yaml` and `017-trend-btc-eth-forward.yaml` are one
+such rule, BTC and ETH over 20, 60 and 120 days, each to 20%, an hour after the close,
+written together before either was opened: 016 over 2024 .. 2026, the development years'
+next (the market over them known in outline), 017 forward. Their beta is reported, and
+only one beyond 1 fails them: a trend takes the market's side by design.
+`tests/test_trend.py` works a trend's direction and size out by hand, holds nothing without
+a bar at the close or the days a lookback or the volatility needs, checks the
+specification, opens the held-out period with the days its lookbacks need before it, and
+has the shadow decide what that run holds.
 `tests/test_xsection_kind.py` passes a planted carry and confirms it once, fails one where
 the funding does not last, shows the development run unchanged when the held-out prices
 are, makes the same Sharpe ratio worth less against trials that differ more, trades a rule
@@ -776,7 +792,7 @@ first day sets, as its held-out run does. `--catch-up` also records every close 
 the last one recorded (31 at most), each from the data up to its own close, the time it
 was decided written next to it: a machine that was off catches up. `scripts/shadow_daily.sh
 SPEC ...`, from cron or the systemd user timer in `scripts/systemd/` (00:10 UTC, run at the
-next start if the machine was off; it records 011 and 015, whose longs differ), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
+next start if the machine was off; it records 011, 015 and 017, whose positions differ), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
 `--end` of today, whose bar Binance serves while it is still open and which would stay so)
 and records the decisions. `tests/test_shadow.py` checks a decision against what the
 held-out run holds the next day, also between rebalances, and that it is the same with
@@ -804,6 +820,8 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 013 as 011, each position sold once it has lost its weight | passed on development (PBO 0.04, deflated Sharpe 0.80 against 12 trials, reported); held out forward over the same two years | traded an hour after the close, +27.7% a year 2020 .. 2023 (Sharpe from months 1.28, worst drawdown 20.9%; 2022 +0.2%), against +27.4% (1.26) for 011 the same way |
 | 014 as 011, its capital split among the hour after each funding settlement | passed on development (PBO 0.02, deflated Sharpe 0.90 against 13 trials, reported); held out forward over the same two years | +26.1% a year 2020 .. 2023 (Sharpe from months 1.24, worst drawdown 22.8%), against +27.4% (1.26) for 011, traded an hour after the close only |
 | 015 as 011, its long half the rest of the universe | passed on development (PBO 0.07, deflated Sharpe 0.79 against 14 trials, reported); held out forward over the same two years | +19.5% a year 2020 .. 2023 (Sharpe from months 1.20, worst drawdown 15.0%, beta -0.01; +10.9, +50.2, +5.9 and +10.8% by year), against +27.4% (1.26, worst drawdown 20.9%) for 011, traded an hour after the close only |
+| 016 trend on BTC and ETH, 20, 60 and 120 days together, each coin to 20% volatility, an hour after the close | written; held out January 2024 .. October 2026, opened once | in the rough look before it, +17.0% a year 2020 .. 2023 (Sharpe from months 1.10, worst drawdown 16.1%), correlated with 011 at -0.13 |
+| 017 as 016, tested forward | written; held out forward, 2026-12-01 .. 2028-11-30 | |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
@@ -877,6 +895,22 @@ the carry earned as a short of the coins paying the most funding, not by the fun
 collected; and Binance's +34.5% a year before costs came from ten of the 400 coins it held
 (+41.4; the other 390, -6.9), ALPACA, SIREN, GOAT, PIPPIN and RIVER the largest. What two
 years forward show of 011 will turn on a few such coins.
+
+Strategies besides the carry, a rough look at the development years only (2020 .. 2023)
+[backtest]. A trend on BTC and ETH, the whole capital on the sign of the last 20, 60 or 120
+days: +38.9 to +64.7% a year at Sharpe from months 0.58 to 1.11, worst drawdowns 67 to 105%;
+the three averaged, +48.8% (0.97, 55.1%); each coin held to 20% volatility over its last 30
+days, +17.0% (1.10, 16.1%), correlated with 011 at -0.13, and half in it and half in 011,
+1.44 where 011 alone made 1.27: written as 016 and 017. New listings shorted against the
+universe: +69.5% a year (1.12) over their first 30 days, +3.5% over days 8 to 60, -3.5% over
+days 31 to 90: their first week and its squeezes (worst day -19.8%); not written. Long a
+coin on the exchange where its funding was lower and short it on the other, Binance against
+Bybit: +0.3 to +0.9% a year, the gap having shrunk from 7.4 bp a day in 2020 to 1.6 in 2023.
+Topology, after Gidea and Katz (the Vietoris-Rips persistence of the last 50 days' returns
+of 7 coins): its numbers foretold the next 30 days' drawdown and volatility (rank
+correlation 0.28 to 0.47) no better than the volatility itself (0.47 and 0.52); each window
+scaled to its spread, its shape alone, nothing (-0.15 to +0.03); and halving 011 when one was
+high lowered 011's Sharpe every time. On daily returns, the topology measured their size.
 
 Erratum: the comment in `experiments/007-flow-beats-cost.yaml` calls the days of
 Tardis.dev's recording futures days. They are Binance spot BTCUSDT. The hypothesis is left
