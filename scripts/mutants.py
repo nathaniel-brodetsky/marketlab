@@ -1118,8 +1118,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,\n",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered,\n",
+        "        pnl_h, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp,",
+        "        pnl_h, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0,",
         "the hypothesis trades for free",
     ),
     (
@@ -1214,8 +1214,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,\n",
-        "    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, False,\n",
+        "                                       rule.staggered, margin, stop)  # fmt: skip",
+        "                                       False, margin, stop)  # fmt: skip",
         "a staggered hypothesis run as one portfolio",
     ),
     (
@@ -1382,8 +1382,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    if spec.primary.hours or spec.primary.isolated is not None:",
-        "    if spec.primary.hours:",
+        "    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h or margined]:",
+        "    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h]:",
         "the held-out run on margin without its hour bars checked",
     ),
     (
@@ -1481,6 +1481,54 @@ M = [
         "            traded[i] += np.abs(new - w * alive).sum()\n            w, alive, lost = new, np.ones(m, dtype=bool), np.zeros(m)",
         "            traded[i] += np.abs(new - w * alive).sum()\n            w, lost = new, np.zeros(m)",
         "a stopped position out after its rebalance too",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        pnl, gross = pnl + pnl_h / len(hours), gross + gross_h / len(hours)",
+        "        pnl, gross = pnl + pnl_h, gross + gross_h",
+        "each hour of a split with all the capital",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        mkt = mkt + xs.market(inu, r, start) / len(hours)",
+        "        mkt = mkt + xs.market(inu, r, start)",
+        "a split rule's market summed over its hours",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    hours = rule.split or (rule.hours,)",
+        "    hours = (rule.hours,)",
+        "a split rule traded at its first hour only",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        r, margin = _returns(p, replace(rule, hours=h, split=()), cache, root, held_out)",
+        "        r, margin = _returns(p, replace(rule, split=()), cache, root, held_out)",
+        "every hour of a split priced at the first",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h or margined]:",
+        "    for h in [h for h in (spec.primary.hours,) if h or margined]:",
+        "the held-out run checks a split rule's first hour only",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        if hrs and "hours" in d:',
+        "        if False:",
+        "a split and an hour together taken",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        hrs = d.get("split", base.split if base else ())',
+        '        hrs = d.get("split", ())',
+        "a variant without the primary's split",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "                len(hrs) < 2 or len(set(hrs)) != len(hrs)",
+        "                len(set(hrs)) != len(hrs)",
+        "a split of one hour taken",
     ),
 ]
 survived = []

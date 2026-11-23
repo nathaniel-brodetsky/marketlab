@@ -1,0 +1,78 @@
+# Written on 2026-11-23, before any of its held-out days exist: they are the two years from
+# 2026-12-01, tested forward, as 011's, 012's and 013's. Everything up to 2026-10-31 has
+# been seen.
+#
+# 009 showed that "every 7 days" hid a free parameter, the weekday it rebalanced on, and its
+# verdict was that weekday's luck; 011 runs seven portfolios, one rebalanced each day, so that
+# no weekday decides it. A reader of the post on it pointed out a second one [the rebalance
+# timing luck of Hoffstein, Sibears and Faber]: the hour. Binance settles most perpetuals'
+# funding at 00:00, 08:00 and 16:00 UTC, and 011 trades only at 01:00, an hour after the
+# first. As one portfolio decided at the close, 009's carry traded 0 .. 12 hours later made
+# +31.7 .. +36.9% a year on the development years [backtest]: a smaller spread than the
+# weekdays', but a choice all the same, and 09:00 and 17:00 were not among those looked at.
+#
+# So this is 011 with its capital split evenly among the hour after each settlement: 01:00,
+# 09:00 and 17:00 UTC, each third held as seven staggered portfolios, twenty-one in all, each
+# trading on its own (what two of them trade in one coin the same day is not netted, so the
+# costs are an upper bound). Its decisions are 011's, made at the daily close and recorded by
+# the shadow; only when each share of them is traded differs, and the held-out run reads the
+# hour bars at all three hours.
+#
+# 011, 013 and 014 are one carry traded three ways over the same two years: their verdicts
+# are to be read together, and one confirmed alone says little.
+id: "014"
+name: xsection-carry-hours
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, long those whose mean funding a day over the last 7 days is lowest (strictly
+  in the bottom 20%), short those whose is highest (strictly in the top 20%), half the
+  capital a side in equal weights, decided at the daily close; the capital split evenly among
+  trading 1, 9 and 17 hours after the close, each third held 7 days as seven staggered
+  portfolios, one rebalanced every day; paying 9 bp a round trip on every unit traded and the
+  funding as settled: its daily net is above zero over 2026-12-01 .. 2028-11-30.
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: carry           # minus the mean of the daily funding sums over the last 7 days
+  hold: 7                 # days each portfolio is held
+  staggered: true         # seven of them, one rebalanced each day
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # a side
+  split: [1, 9, 17]       # a third traded an hour after each funding settlement (UTC)
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 1}
+
+trials:                   # the rules looked at before it was written
+  - {split: null}                  # 011, traded an hour after the close
+  - {split: null, stop: 1}         # 013
+  - {split: null, stop: 0.5}
+  - {split: null, isolated: 0.05}  # 012
+  - {hold: 1, split: null}
+  - {signal: mom7, hold: 1, split: null}
+  - {signal: mom7, split: null}
+  - {signal: mom30, hold: 1, split: null}
+  - {signal: mom30, split: null}
+  - {signal: rev1, hold: 1, split: null}
+  - {split: null, hours: 0}                   # at the close
+  - {split: null, hours: 0, isolated: 0.05}   # at the close, on margin
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20).
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 13 trials is reported, not a bar, as for 011
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)

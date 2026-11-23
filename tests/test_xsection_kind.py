@@ -11,6 +11,7 @@ from test_tradeflow import PROV
 from test_xsection import write, zigzag
 
 from marketlab import experiment as ex
+from marketlab import xsection as xs
 from marketlab import xsection_kind as xk
 
 SPEC = """
@@ -357,5 +358,53 @@ def test_the_committed_carry_with_a_stop_loads():
     twelve = xk.load_spec(root / "012-xsection-carry-isolated.yaml")
     assert spec.trials[1] == eleven.primary and twelve.primary in spec.trials
     assert len(spec.trials) == 12 and all(t.hours in (0, 1) for t in spec.trials)
+    assert (spec.holdout_first, spec.holdout_last) == (eleven.holdout_first, eleven.holdout_last)
+    assert spec.min_dsr is None and spec.min_positive_years == 2 and spec.max_abs_beta == 0.3
+
+
+def test_a_rule_split_among_hours(tmp_path):
+    # every day's move made in its first two hours: at the close a reversal gets it, four
+    # hours later it pays for it; split between the two, it is their mean
+    zigzag(tmp_path / "d", days=DAYS, first="2021-11-01")
+    text = SPEC.replace("rule: {signal: carry, hold: 7, top: 20, q: 0.2}",
+                        "rule: {signal: rev1, hold: 1, top: 12, q: 0.2, split: [4, 0]}").replace(
+        "variants:\n  - {hold: 1}", "variants:\n  - {split: null}")  # fmt: skip
+    spec = xk.load_spec(spec_file(tmp_path, text))
+    assert spec.primary == xk.Rule("rev1", 1, 12, 0.2, 0, False, None, None, (0, 4))
+    assert spec.variants[1].split == () and spec.variants[1].hours == 0
+    assert spec.trials[1].split == (0, 4)  # a trial keeps the primary's split
+    assert spec.primary.name.endswith(", its capital split evenly among 0 and 4 h after the close")
+    for bad in ("[1]", "[1, 1]", "[1, 24]", "[x, 2]", "5", "true"):
+        with pytest.raises(ex.ExperimentError, match="split is a list of two or more"):
+            xk.load_spec(spec_file(tmp_path, text.replace("split: [4, 0]", f"split: {bad}")))
+    with pytest.raises(ex.ExperimentError, match="split or hours, not both"):
+        xk.load_spec(spec_file(tmp_path, text.replace("split: [4, 0]", "split: [4, 0], hours: 2")))
+    p = xs.load(tmp_path / "d", spec.first, spec.last)
+    both = xk.follow(p, spec.primary, spec.first, 9.0, {}, tmp_path / "d")
+    each = [xk.follow(p, xk.Rule("rev1", 1, 12, 0.2, h), spec.first, 9.0, {}, tmp_path / "d")
+            for h in (0, 4)]  # fmt: skip
+    assert np.allclose(both.net, (each[0].net + each[1].net) / 2, rtol=0, atol=1e-15)
+    assert np.allclose(both.gross, (each[0].gross + each[1].gross) / 2, rtol=0, atol=1e-15)
+    assert np.allclose(both.market, (each[0].market + each[1].market) / 2, rtol=0, atol=1e-15)
+    assert each[1].net.mean() < both.net.mean() < each[0].net.mean()
+    # the held-out run checks the hour bars at the hour it needs them, before anything
+    xk.run(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+    for f in (tmp_path / "d" / "um" / "klines" / "C03USDT" / "1h").glob("C03USDT-1h-2024-*.zip"):
+        f.unlink()
+    with pytest.raises(ex.ExperimentError, match=r"traded 4 h after the close .* for C03USDT"):
+        xk.final(spec, tmp_path / "d", tmp_path / "results", prov=PROV)
+
+
+def test_the_committed_carry_split_among_hours_loads():
+    root = Path(__file__).resolve().parents[1] / "experiments"
+    spec = xk.load_spec(root / "014-xsection-carry-hours.yaml")
+    assert spec.primary == xk.Rule("carry", 7, 50, 0.2, 1, True, None, None, (1, 9, 17))
+    assert spec.primary.name.endswith("as 7 staggered portfolios, its capital split evenly among "
+                                      "1, 9 and 17 h after the close")  # fmt: skip
+    assert [(v.hold, v.split) for v in spec.variants] == [(7, (1, 9, 17)), (1, (1, 9, 17))]
+    eleven = xk.load_spec(root / "011-xsection-carry-forward.yaml")
+    thirteen = xk.load_spec(root / "013-xsection-carry-stop.yaml")
+    assert spec.trials[1] == eleven.primary and thirteen.primary in spec.trials
+    assert len(spec.trials) == 13 and all(t.split == () for t in spec.trials[1:])
     assert (spec.holdout_first, spec.holdout_last) == (eleven.holdout_first, eleven.holdout_last)
     assert spec.min_dsr is None and spec.min_positive_years == 2 and spec.max_abs_beta == 0.3

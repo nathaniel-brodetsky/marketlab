@@ -6,8 +6,8 @@ is read, and judged once on days it has never seen.**
 [![ci](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml/badge.svg)](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
-![hypotheses](https://img.shields.io/badge/hypotheses-13%20written%2C%20failures%20kept-0b0b0b)
-![injected faults](https://img.shields.io/badge/injected%20faults-245%20caught-0b0b0b)
+![hypotheses](https://img.shields.io/badge/hypotheses-14%20written%2C%20failures%20kept-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-253%20caught-0b0b0b)
 
 From order books recorded tick by tick by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
@@ -26,8 +26,8 @@ on which days.
 | **The protocol** | purged and combinatorial cross-validation, at least 200 surrogates of each of three kinds, Benjamini-Hochberg over every hypothesis ever written (unrun ones at p = 1), the probability of backtest overfitting, the deflated Sharpe ratio against every rule looked at first. |
 | **Costs** | every trading rule through a fill simulator by queue position, judged in its pessimistic mode, or at a futures taker's 9 bp a round trip and the funding as settled. |
 | **Found** | order flow forecasts the next second and volatility the size of the next moves, out of sample; neither pays its fees. Funding carry pays after them: spot against perpetual at about the rate of Treasury bills since 2022, carry across coins more, but not yet distinguishably from noise. |
-| **Running** | carry across coins, with and without a stop on each position, tested forward on days that do not exist yet (2026-12-01 .. 2028-11-30), its decisions recorded every day before they would trade. |
-| **Checked** | a look-ahead test that cuts days at random times and finds nothing before the cut changed; 245 deliberately injected one-line faults, each caught by the tests. |
+| **Running** | carry across coins traded three ways (as it is, with a stop on each position, and split among the hours after each funding settlement), tested forward on days that do not exist yet (2026-12-01 .. 2028-11-30), its decisions recorded every day before they would trade. |
+| **Checked** | a look-ahead test that cuts days at random times and finds nothing before the cut changed; 253 deliberately injected one-line faults, each caught by the tests. |
 
 ## Results so far
 
@@ -44,8 +44,9 @@ on which days.
 | 009 | funding carry across coins | confirmed at p 0.0499, then shown to be its start day's luck |
 | 010 | momentum across coins | failed: PBO 0.55 |
 | 011 | the carry as seven staggered portfolios | passed development; tested forward to 2028-11-30 |
-| 012 | the same, each position on isolated margin | failed on development: its liquidations cost more than its floor saved |
-| 013 | the same, each position sold once it has lost its weight | written; tested forward to 2028-11-30 |
+| 012 | 011 with each position on isolated margin | failed on development: its liquidations cost more than its floor saved |
+| 013 | 011 with each position sold once it has lost its weight | passed development; tested forward to 2028-11-30 |
+| 014 | 011 with its capital split among the hour after each funding settlement | written; tested forward to 2028-11-30 |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -518,8 +519,8 @@ trade-flow, screen and edge kinds) add their own, among them a gate that counts 
 it is compared with and a taker filled with no latency; and the cross-section's, among them
 coins tied on a rate ranked by rounding, a day's span an hour late, a liquidated position
 bought back for free and one whose losses are forgotten the next day, a stop at the whole
-weight whatever it is set to, and a symbol in Chinese letters asked for as it is: 245 in
-all, each caught.
+weight whatever it is set to, a rule split among hours traded at the first of them only, and
+a symbol in Chinese letters asked for as it is: 253 in all, each caught.
 
 ## Numbers
 
@@ -724,6 +725,13 @@ loss since its rebalance, its funding in, reaches its own weight at a day's trad
 sold there, paying for the sale, and holds nothing until its portfolio's next rebalance.
 Its decisions are 011's; it was written after a rough look at nine floors and filters
 (What has been found, below), all of them among its trials or named in it.
+`experiments/014-xsection-carry-hours.yaml` is 011 with its capital split evenly among
+trading 1, 9 and 17 hours after the close (`split: [1, 9, 17]`), an hour after each of the
+three funding settlements most perpetuals have, each third held as seven staggered
+portfolios: as staggering takes the weekday out of a weekly rule, the split takes out the
+hour. Its held-out run checks the hour bars at each of the three hours before anything.
+011, 013 and 014 are one carry traded three ways over the same two years, and their
+verdicts are to be read together.
 `tests/test_xsection_kind.py` passes a planted carry and confirms it once, fails one where
 the funding does not last, shows the development run unchanged when the held-out prices
 are, makes the same Sharpe ratio worth less against trials that differ more, trades a rule
@@ -738,6 +746,9 @@ liquidated the same day are back in one a day; and a stop: a short that loses it
 two days sold at the end of the second, a long that loses 99% of it kept and sold the next
 day, each sale paid on its day and the rebuying at the rebalance, a stop never reached
 changing nothing, and seven staggered portfolios each stopped on its own days.
+`tests/test_xsection_kind.py` also splits a rule between the close and four hours after it
+on days whose move is made in their first two hours: the split is the mean of the two, and
+its held-out run stops at the hour whose bars are missing.
 
 ### The shadow
 
@@ -780,7 +791,8 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 010 momentum across coins, an hour after the close | failed on development: PBO 0.55 over its 3 variants; its held-out period informs, decides nothing | +50.5% a year 2020 .. 2023, Sharpe from months 1.40, p after BH 0.004 |
 | 011 funding carry across coins, staggered, an hour after the close | passed on development (PBO 0.03, deflated Sharpe 0.76, reported); held out forward, 2026-12-01 .. 2028-11-30, recorded day by day by the shadow | at the close, +29.2% a year 2020 .. 2023 (Sharpe from months 1.34), +27.4% 2024 .. 2026 (0.73, p 0.126, worst drawdown 42.5%) |
 | 012 the same, each position on isolated margin | failed on development: p after Benjamini-Hochberg 0.062 (PBO 0.02, deflated Sharpe 0.54, reported); its held-out period informs, decides nothing | traded an hour after the close, +21.5% a year 2020 .. 2023, Sharpe from months 0.87, worst drawdown 28.5%, against 1.27 for 011 the same way: squeezed coins went far past their close within the day, and a position liquidated there lost what the close gave back |
-| 013 the same, each position sold once it has lost its weight | written; held out forward over the same two years | traded an hour after the close, 2020 .. 2023 +27.6% a year (Sharpe from months 1.27, sold 29 times), against +27.4% (1.26) for 011 the same way |
+| 013 as 011, each position sold once it has lost its weight | passed on development (PBO 0.04, deflated Sharpe 0.80 against 12 trials, reported); held out forward over the same two years | traded an hour after the close, +27.7% a year 2020 .. 2023 (Sharpe from months 1.28, worst drawdown 20.9%; 2022 +0.2%), against +27.4% (1.26) for 011 the same way |
+| 014 as 011, its capital split among the hour after each funding settlement | written; held out forward over the same two years | |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the

@@ -9,7 +9,8 @@ equal weights, rebalanced every `hold` days at the day's close; `round_trip_bp` 
 unit of weight traded, the funding paid or received in the P&L. It may be traded `hours`
 after the close, held as `hold` staggered portfolios, and hold each position on isolated
 margin of its own size (`isolated`, the maintenance rate: `xsection.Margin`) or sell it
-once it has lost a given share of its weight (`stop`: `xsection.Stop`).
+once it has lost a given share of its weight (`stop`: `xsection.Stop`), and split its
+capital among several hours after the close (`split`).
 
 The development run scores the primary and its variants on the development days: the
 daily net, in bp of the capital, tested for a mean above zero with Newey-West errors and
@@ -28,7 +29,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -55,10 +56,16 @@ class Rule:
     isolated: float | None = None
     # each position sold once it has lost this many times its weight (xsection.Stop)
     stop: float | None = None
+    # the capital split evenly among these hours after the close, each traded as `hours`
+    # is (which is then the first of them): no hour decides it, as no weekday a staggered rule
+    split: tuple[int, ...] = ()
 
     @property
     def name(self) -> str:
         late = f", traded {self.hours} h after the close" if self.hours else ""
+        if self.split:
+            at = ", ".join(str(h) for h in self.split[:-1]) + f" and {self.split[-1]}"
+            late = f", its capital split evenly among {at} h after the close"
         tranches = f", as {self.hold} staggered portfolios" if self.staggered else ""
         margin = (f", each position on isolated margin (maintenance {self.isolated:.1%})"
                   if self.isolated is not None else "")  # fmt: skip
@@ -149,10 +156,22 @@ def load_spec(path: str | Path) -> Spec:
                 f" or null; not {cut!r}")  # fmt: skip
         if iso is not None and cut is not None:
             raise ex.ExperimentError(f"{path}: isolated or stop, not both, in a rule")
+        # split: two or more hours after the close, or null (in a variant: the primary's off)
+        hrs = d.get("split", base.split if base else ())
+        hrs = () if hrs is None else hrs
+        if not isinstance(hrs, list | tuple) or (hrs and (
+                len(hrs) < 2 or len(set(hrs)) != len(hrs)
+                or not all(type(h) is int and 0 <= h < 24 for h in hrs))):  # fmt: skip
+            raise ex.ExperimentError(
+                f"{path}: split is a list of two or more different hours from 0 to 23 after the"
+                f" close, or null; not {hrs!r}")  # fmt: skip
+        if hrs and "hours" in d:
+            raise ex.ExperimentError(f"{path}: split or hours, not both, in a rule")
+        hrs = tuple(sorted(hrs))
         r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
-                 int(get("hours", 0)), stag and int(get("hold")) > 1,
+                 hrs[0] if hrs else int(get("hours", 0)), stag and int(get("hold")) > 1,
                  None if iso is None else float(iso),
-                 None if cut is None else float(cut))  # fmt: skip
+                 None if cut is None else float(cut), hrs)  # fmt: skip
         if r.signal not in xs.SIGNALS:
             raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of {xs.SIGNALS}")
         if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
@@ -235,25 +254,30 @@ def _returns(p: xs.Panel, rule: Rule, cache: dict, root: str | Path | None,
 def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
            root: str | Path | None = None, held_out: bool = False) -> Days:  # fmt: skip
     """The rule from `first` to the panel's last day; `cache` keeps what rules share. A rule
-    traded hours after the close, or on isolated margin, reads the hour bars under `root`."""
+    traded hours after the close, or on isolated margin, reads the hour bars under `root`; a
+    rule split among hours is the mean of itself traded at each of them."""
     if rule.top not in cache:
         cache[rule.top] = xs.universe(p, rule.top)
     if "x" not in cache:
         cache["x"] = xs.signals(p)
-    r, margin = _returns(p, rule, cache, root, held_out)
     stop = xs.Stop(rule.stop) if rule.stop is not None else None
     inu, x = cache[rule.top], cache["x"][rule.signal]
     start = p.dates.index(first)
-    pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,
-                                 margin, stop)  # fmt: skip
-    gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered, margin,
-                               stop)  # fmt: skip
     held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)
     on = held[start:] != 0
-    mkt = xs.market(inu, r, start)
+    hours = rule.split or (rule.hours,)
+    pnl, gross, mkt, priced = 0.0, 0.0, 0.0, 0.0
+    for h in hours:  # each hour a share of the capital, its positions on their own
+        r, margin = _returns(p, replace(rule, hours=h, split=()), cache, root, held_out)
+        pnl_h, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp,
+                                       rule.staggered, margin, stop)  # fmt: skip
+        gross_h, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered,
+                                     margin, stop)  # fmt: skip
+        pnl, gross = pnl + pnl_h / len(hours), gross + gross_h / len(hours)
+        mkt = mkt + xs.market(inu, r, start) / len(hours)
+        priced += float(np.isfinite(r[start:])[on].mean()) if on.any() else float("nan")
     return Days(p.dates[start:], pnl[start:], gross[start:], mkt[start:],
-                float(np.mean(names)) if names else float("nan"),
-                float(np.isfinite(r[start:])[on].mean()) if on.any() else float("nan"))  # fmt: skip
+                float(np.mean(names)) if names else float("nan"), priced / len(hours))  # fmt: skip
 
 
 def score(d: Days, lags: int) -> dict:
@@ -419,9 +443,10 @@ def final(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | Non
     if not p.symbols or not np.isfinite(p.close[p.dates.index(spec.holdout_first) :]).any():
         raise ex.ExperimentError("no daily bars in the held-out period")
     cache: dict = {}
-    # the hour bars there first, or nothing is computed
-    if spec.primary.hours or spec.primary.isolated is not None:
-        h, start = spec.primary.hours, p.dates.index(spec.holdout_first)
+    # the hour bars there first, at every hour it trades at, or nothing is computed
+    margined = spec.primary.isolated is not None
+    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h or margined]:
+        start = p.dates.index(spec.holdout_first)
         inu = cache[spec.primary.top] = xs.universe(p, spec.primary.top)
         lag = xs.lagged(p, root, [h], held_out=True)[h]
         cache[("lag", h)] = lag
@@ -433,8 +458,9 @@ def final(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | Non
             names = [p.symbols[j] for j in np.argsort(-short, kind="stable") if short[j]]
             raise ex.ExperimentError(
                 f"hour bars at both ends for {share:.1%} of the held-out universe's coin-days "
-                f"(at least {MIN_PRICED:.0%} asked): fetch them with scripts/fetch_hourly.py "
-                f"for {', '.join(names)}; nothing was computed or recorded"
+                f"traded {h} h after the close (at least {MIN_PRICED:.0%} asked): fetch them "
+                f"with scripts/fetch_hourly.py for {', '.join(names)}; nothing was computed or "
+                f"recorded"
             )
     d = follow(p, spec.primary, spec.holdout_first, spec.round_trip_bp, cache, root, True)
     s = score(d, spec.nw_lags)
