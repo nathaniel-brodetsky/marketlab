@@ -72,7 +72,7 @@ def decide(root: str | Path, spec: xk.Spec, close: str, today: str | None = None
     # period's first day sets; staggered, any start gives the same once all are in
     anchor = (dt.date.fromisoformat(spec.holdout_first) - dt.date.fromisoformat(p.dates[0])).days
     start = anchor % rule.hold
-    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)
+    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered, rule.long)
     w = held[last + 1]
     trade = dt.datetime.fromisoformat(close).replace(tzinfo=dt.UTC) + dt.timedelta(
         days=1, hours=rule.hours

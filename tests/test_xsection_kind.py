@@ -408,3 +408,40 @@ def test_the_committed_carry_split_among_hours_loads():
     assert len(spec.trials) == 13 and all(t.split == () for t in spec.trials[1:])
     assert (spec.holdout_first, spec.holdout_last) == (eleven.holdout_first, eleven.holdout_last)
     assert spec.min_dsr is None and spec.min_positive_years == 2 and spec.max_abs_beta == 0.3
+
+
+def test_a_rule_short_against_the_rest(tmp_path):
+    planted(tmp_path / "d", True, seed=1)
+    text = SPEC.replace("rule: {signal: carry, hold: 7, top: 20, q: 0.2}",
+                        "rule: {signal: carry, hold: 7, top: 20, q: 0.2, long: rest}").replace(
+        "variants:\n  - {hold: 1}", "variants:\n  - {hold: 1}\n  - {long: picked}")  # fmt: skip
+    spec = xk.load_spec(spec_file(tmp_path, text))
+    assert spec.primary == xk.Rule("carry", 7, 20, 0.2, 0, False, None, None, (), "rest")
+    assert spec.primary.name == "carry, every 7 days, top 20, short 20% against the rest"
+    assert [v.long for v in spec.variants] == ["rest", "rest", "picked"]
+    assert all(t.long == "rest" for t in spec.trials)  # a trial keeps the primary's
+    with pytest.raises(ex.ExperimentError, match="long is one of"):
+        xk.load_spec(spec_file(tmp_path, text.replace("long: rest", "long: all")))
+    p = xs.load(tmp_path / "d", spec.first, spec.last)
+    got = xk.follow(p, spec.primary, spec.first, 9.0, {})
+    start = p.dates.index(spec.first)
+    want, _, _ = xs.portfolio(xs.signals(p)["carry"], xs.universe(p, 20), xs.daily_returns(p),
+                              start, 7, 0.2, 9.0, long="rest")  # fmt: skip
+    assert np.allclose(got.net, want[start:], rtol=0, atol=1e-15)
+    eleven = xk.follow(p, spec.variants[2], spec.first, 9.0, {})
+    assert not np.allclose(got.net, eleven.net) and got.names > eleven.names
+
+
+def test_the_committed_carry_short_against_the_rest_loads():
+    root = Path(__file__).resolve().parents[1] / "experiments"
+    spec = xk.load_spec(root / "015-xsection-carry-short.yaml")
+    assert spec.primary == xk.Rule("carry", 7, 50, 0.2, 1, True, None, None, (), "rest")
+    assert spec.primary.name == ("carry, every 7 days, top 50, short 20% against the rest, as 7 "
+                                 "staggered portfolios, traded 1 h after the close")  # fmt: skip
+    assert [(v.hold, v.long) for v in spec.variants] == [(7, "rest"), (1, "rest")]
+    before = [xk.load_spec(f).primary for f in sorted(root.glob("01[1-4]-xsection-*.yaml"))]
+    assert len(before) == 4 and all(r in spec.trials for r in before)
+    assert len(spec.trials) == 14 and all(t.long == "picked" for t in spec.trials[1:])
+    eleven = xk.load_spec(root / "011-xsection-carry-forward.yaml")
+    assert (spec.holdout_first, spec.holdout_last) == (eleven.holdout_first, eleven.holdout_last)
+    assert spec.min_dsr is None and spec.min_positive_years == 2 and spec.max_abs_beta == 0.3

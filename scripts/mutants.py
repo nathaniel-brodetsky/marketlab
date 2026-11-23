@@ -1214,8 +1214,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "                                       rule.staggered, margin, stop)  # fmt: skip",
-        "                                       False, margin, stop)  # fmt: skip",
+        "                                       rule.staggered, margin, stop, rule.long)  # fmt: skip",
+        "                                       False, margin, stop, rule.long)  # fmt: skip",
         "a staggered hypothesis run as one portfolio",
     ),
     (
@@ -1358,8 +1358,8 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "            held_s, _, _, _ = holdings(x, inu, s, hold, q)",
-        "            held_s, _, _, _ = holdings(x, inu, start, hold, q)",
+        "            held_s, _, _, _ = holdings(x, inu, s, hold, q, long=long)",
+        "            held_s, _, _, _ = holdings(x, inu, start, hold, q, long=long)",
         "the staggered portfolios on margin all started the same day",
     ),
     (
@@ -1601,6 +1601,54 @@ M = [
         '    closed = [s for s in syms if s["status"] == "Closed" and s["underlying_type"] == "COIN"]',
         '    closed = [s for s in syms if s["status"] == "Closed"]',
         "Bybit: a delisted stock listed among the delisted coins",
+    ),
+    (
+        "marketlab/xsection.py",
+        "                longs = idx[v >= lo]  # every coin not shorted",
+        "                longs = idx[v > lo]  # every coin not shorted",
+        "a coin at the short cut left out of the rest",
+    ),
+    (
+        "marketlab/xsection.py",
+        '            if long == "rest":\n                longs = idx[v >= lo]',
+        '            if long != "rest":\n                longs = idx[v >= lo]',
+        "the rest long for 011's rule, the picked for the rest's",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        parts = [holdings(x, inu, s, hold, q, long=long) for s in starts]",
+        "        parts = [holdings(x, inu, s, hold, q) for s in starts]",
+        "staggered portfolios long the picked, not the rest",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            held_s, _, _, _ = holdings(x, inu, s, hold, q, long=long)",
+        "            held_s, _, _, _ = holdings(x, inu, s, hold, q)",
+        "a stop's portfolios long the picked, not the rest",
+    ),
+    (
+        "marketlab/xsection.py",
+        "    held, traded, turns, names = holdings(x, inu, start, hold, q, staggered, long)\n    pnl =",
+        "    held, traded, turns, names = holdings(x, inu, start, hold, q, staggered)\n    pnl =",
+        "the portfolio long the picked, not the rest",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "                                       rule.staggered, margin, stop, rule.long)  # fmt: skip",
+        "                                       rule.staggered, margin, stop)  # fmt: skip",
+        "a hypothesis's rule long the picked, not the rest",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        side = d.get("long", base.long if base else "picked")',
+        '        side = d.get("long", "picked")',
+        "a variant without the primary's long half",
+    ),
+    (
+        "marketlab/shadow.py",
+        "    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered, rule.long)",
+        "    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)",
+        "the shadow records the picked longs for the rest's rule",
     ),
 ]
 survived = []

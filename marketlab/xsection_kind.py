@@ -9,8 +9,10 @@ equal weights, rebalanced every `hold` days at the day's close; `round_trip_bp` 
 unit of weight traded, the funding paid or received in the P&L. It may be traded `hours`
 after the close, held as `hold` staggered portfolios, and hold each position on isolated
 margin of its own size (`isolated`, the maintenance rate: `xsection.Margin`) or sell it
-once it has lost a given share of its weight (`stop`: `xsection.Stop`), and split its
-capital among several hours after the close (`split`).
+once it has lost a given share of its weight (`stop`: `xsection.Stop`), split its
+capital among several hours after the close (`split`), and hold its long half in every
+other coin of the universe instead of the picked ones (`long: rest`), its shorts against the
+rest of the universe.
 
 The development run scores the primary and its variants on the development days: the
 daily net, in bp of the capital, tested for a mean above zero with Newey-West errors and
@@ -59,6 +61,9 @@ class Rule:
     # the capital split evenly among these hours after the close, each traded as `hours`
     # is (which is then the first of them): no hour decides it, as no weekday a staggered rule
     split: tuple[int, ...] = ()
+    # the long half: "picked", the coins above the 1 - q quantile; "rest", every coin of the
+    # universe not shorted, equal weights (on the days the picked would have a coin a side)
+    long: str = "picked"
 
     @property
     def name(self) -> str:
@@ -73,7 +78,9 @@ class Rule:
         if self.stop is not None:
             lost = "its weight" if self.stop == 1 else f"{self.stop:g} times its weight"
             stop = f", each position sold once it has lost {lost}"
-        return (f"{self.signal}, every {self.hold} days, top {self.top}, {self.q:.0%} a side"
+        side = (f"short {self.q:.0%} against the rest" if self.long == "rest"
+                else f"{self.q:.0%} a side")  # fmt: skip
+        return (f"{self.signal}, every {self.hold} days, top {self.top}, {side}"
                 + tranches + late + margin + stop)  # fmt: skip
 
 
@@ -168,10 +175,14 @@ def load_spec(path: str | Path) -> Spec:
         if hrs and "hours" in d:
             raise ex.ExperimentError(f"{path}: split or hours, not both, in a rule")
         hrs = tuple(sorted(hrs))
+        # long: the picked coins (as 011) or the rest of the universe
+        side = d.get("long", base.long if base else "picked")
+        if side not in xs.LONGS:
+            raise ex.ExperimentError(f"{path}: long is one of {list(xs.LONGS)}, not {side!r}")
         r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
                  hrs[0] if hrs else int(get("hours", 0)), stag and int(get("hold")) > 1,
                  None if iso is None else float(iso),
-                 None if cut is None else float(cut), hrs)  # fmt: skip
+                 None if cut is None else float(cut), hrs, side)  # fmt: skip
         if r.signal not in xs.SIGNALS:
             raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of {xs.SIGNALS}")
         if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
@@ -263,16 +274,16 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
     stop = xs.Stop(rule.stop) if rule.stop is not None else None
     inu, x = cache[rule.top], cache["x"][rule.signal]
     start = p.dates.index(first)
-    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)
+    held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered, rule.long)
     on = held[start:] != 0
     hours = rule.split or (rule.hours,)
     pnl, gross, mkt, priced = 0.0, 0.0, 0.0, 0.0
     for h in hours:  # each hour a share of the capital, its positions on their own
         r, margin = _returns(p, replace(rule, hours=h, split=()), cache, root, held_out)
         pnl_h, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp,
-                                       rule.staggered, margin, stop)  # fmt: skip
+                                       rule.staggered, margin, stop, rule.long)  # fmt: skip
         gross_h, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered,
-                                     margin, stop)  # fmt: skip
+                                     margin, stop, rule.long)  # fmt: skip
         pnl, gross = pnl + pnl_h / len(hours), gross + gross_h / len(hours)
         mkt = mkt + xs.market(inu, r, start) / len(hours)
         priced += float(np.isfinite(r[start:])[on].mean()) if on.any() else float("nan")

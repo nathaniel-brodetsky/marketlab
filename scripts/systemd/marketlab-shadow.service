@@ -7,4 +7,4 @@ Description=marketlab shadow: what the hypotheses would hold after the daily clo
 [Service]
 Type=oneshot
 WorkingDirectory=%h/projects/marketlab
-ExecStart=%h/projects/marketlab/scripts/shadow_daily.sh experiments/011-xsection-carry-forward.yaml
+ExecStart=%h/projects/marketlab/scripts/shadow_daily.sh experiments/011-xsection-carry-forward.yaml experiments/015-xsection-carry-short.yaml

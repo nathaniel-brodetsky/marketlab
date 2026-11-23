@@ -143,3 +143,18 @@ def test_days_missed_are_caught_up(tmp_path, capsys):
     closes = {r.split(",")[0] for r in (out / f"{spec.slug}.csv").read_text().splitlines()[1:]}
     assert closes == {CLOSE, "2024-03-11", "2024-03-12", "2024-03-13"}
     assert main(args) == 0 and "recorded already" in capsys.readouterr().out
+
+
+def test_a_rule_short_against_the_rest_records_the_rest_long(tmp_path):
+    planted(tmp_path / "all", True, seed=1)
+    text = SPEC.replace("rule: {signal: carry, hold: 7, top: 20, q: 0.2}",
+                        "rule: {signal: carry, hold: 7, top: 20, q: 0.2, long: rest}")  # fmt: skip
+    spec = xk.load_spec(spec_file(tmp_path, text))
+    d = shadow.decide(tmp_path / "all", spec, CLOSE, today="2026-11-23")
+    longs = {s: w for s, w in d.weights.items() if w > 0}
+    shorts = {s: w for s, w in d.weights.items() if w < 0}
+    assert len(shorts) == 4 and len(longs) == 16 and d.universe == 20
+    assert sum(longs.values()) == pytest.approx(0.5) and sum(shorts.values()) == pytest.approx(-0.5)
+    eleven = shadow.decide(tmp_path / "all", xk.load_spec(spec_file(tmp_path)), CLOSE,
+                           today="2026-11-23")  # fmt: skip
+    assert shorts == pytest.approx({s: w for s, w in eleven.weights.items() if w < 0})

@@ -599,3 +599,37 @@ def test_a_stop_never_reached_changes_nothing_and_staggered_ones_stop_on_their_o
     each = [xs.portfolio(x, inu, r, 3 + k, 7, 0.2, 9.0, stop=tight)[0] for k in range(7)]
     assert np.allclose(both, sum(each) / 7, rtol=0, atol=1e-15)
     assert not np.allclose(both, xs.portfolio(x, inu, r, 3, 7, 0.2, 9.0, True)[0])
+
+
+def test_the_shorts_against_the_rest_of_the_universe():
+    # the low cut falls on three coins tied at 1: the one below it is short, all the others
+    # long, the tied ones too; not in the universe, or without a signal, neither
+    x = np.array([0.0, 1, 1, 1, 2, 3, 4, 5, 6, 7, 8, np.nan])
+    inu = np.array([True] * 10 + [False, True])
+    picked = xs._pick(x, inu, 0.2)
+    assert picked[[8, 9]] == pytest.approx([0.25, 0.25]) and picked[0] == -0.5
+    assert np.count_nonzero(picked) == 3
+    rest = xs._pick(x, inu, 0.2, "rest")
+    assert rest[0] == -0.5 and rest[1:10] == pytest.approx(np.full(9, 0.5 / 9))
+    assert rest[10] == rest[11] == 0.0 and rest.sum() == pytest.approx(0.0)
+    # no long picked (the top tied), so neither: the shorts only when 011 would trade
+    flat = np.array([0.0, 1, 2, 3, 4, 5, 5, 5, 5, 5])
+    assert not xs._pick(flat, np.ones(10, dtype=bool), 0.2, "rest").any()
+    with pytest.raises(ValueError, match="long is one of"):
+        xs._pick(x, inu, 0.2, "all")
+    # staggered: each portfolio with the rest long; a stop never reached changes nothing
+    rng = np.random.default_rng(6)
+    xx = rng.normal(size=(60, 20))
+    ones = np.ones_like(xx, dtype=bool)
+    r = rng.normal(0, 0.05, xx.shape)
+    held, traded, _, _ = xs.holdings(xx, ones, 3, 7, 0.2, True, "rest")
+    each = [xs.holdings(xx, ones, 3 + k, 7, 0.2, long="rest") for k in range(7)]
+    assert np.allclose(held, sum(h for h, _, _, _ in each) / 7, rtol=0, atol=1e-15)
+    assert np.allclose(traded, sum(t for _, t, _, _ in each) / 7, rtol=0, atol=1e-15)
+    one = each[0][0][4:]  # a portfolio: all but the four shorted long, every day
+    assert ((one > 0).sum(axis=1) == 16).all() and ((one < 0).sum(axis=1) == 4).all()
+    a = xs.portfolio(xx, ones, r, 3, 7, 0.2, 9.0, True, long="rest")
+    b = xs.portfolio(xx, ones, r, 3, 7, 0.2, 9.0, True, stop=xs.Stop(100.0), long="rest")
+    assert np.allclose(a[0], b[0], rtol=0, atol=1e-15) and a[1:] == b[1:]
+    assert np.allclose(a[0], (held * r).sum(axis=1) - traded * 9.0 / 2 / 1e4, rtol=0, atol=1e-15)
+    assert not np.allclose(a[0], xs.portfolio(xx, ones, r, 3, 7, 0.2, 9.0, True)[0])

@@ -397,11 +397,17 @@ def _tranches(start: int, hold: int, staggered: bool) -> list[int]:
     return [start + k for k in range(hold)] if staggered and hold > 1 else [start]
 
 
-def _pick(x: np.ndarray, inu: np.ndarray, q: float) -> np.ndarray:
+LONGS = ("picked", "rest")
+
+
+def _pick(x: np.ndarray, inu: np.ndarray, q: float, long: str = "picked") -> np.ndarray:
     """A rebalance's weights from a day's signal `x` over the coins in the universe `inu`:
     long those strictly above its `1 - q` quantile, short those strictly below its `q`
     quantile, half the capital a side in equal weights; nothing unless both sides have a
-    coin."""
+    coin. `long` "rest": the long half in every other coin of the universe with a signal
+    instead, the shorts against the rest of it (on the days the two sides have a coin)."""
+    if long not in LONGS:
+        raise ValueError(f"long is one of {LONGS}, not {long!r}")
     new = np.zeros(len(x))
     idx = np.flatnonzero(inu & np.isfinite(x))
     if len(idx):
@@ -409,13 +415,15 @@ def _pick(x: np.ndarray, inu: np.ndarray, q: float) -> np.ndarray:
         hi, lo = np.quantile(v, 1 - q), np.quantile(v, q)
         longs, shorts = idx[v > hi], idx[v < lo]  # strictly: ties are not ranked
         if len(longs) and len(shorts):
+            if long == "rest":
+                longs = idx[v >= lo]  # every coin not shorted
             new[longs] = 0.5 / len(longs)
             new[shorts] = -0.5 / len(shorts)
     return new
 
 
 def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
-             staggered: bool = False) -> Held:  # fmt: skip
+             staggered: bool = False, long: str = "picked") -> Held:  # fmt: skip
     """The weights held over each day (decided at the close of the day before), the weight
     traded each day, the weight traded at each rebalance, and the positions a side.
 
@@ -423,10 +431,10 @@ def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
     days after `start`, so that one is rebalanced every day and no start day decides the
     result (a weekly rule started on a Monday or a Sunday holds the same coins once all
     seven are in). Each trades on its own: what two of them trade in one coin the same day is
-    not netted, so the costs are an upper bound."""
+    not netted, so the costs are an upper bound. `long`: as `_pick`."""
     starts = _tranches(start, hold, staggered)
     if len(starts) > 1:
-        parts = [holdings(x, inu, s, hold, q) for s in starts]
+        parts = [holdings(x, inu, s, hold, q, long=long) for s in starts]
         held = sum(h for h, _, _, _ in parts) / len(starts)
         traded = sum(t for _, t, _, _ in parts) / len(starts)
         turns = [u / len(starts) for _, _, us, _ in parts for u in us]
@@ -440,7 +448,7 @@ def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
     names: list[int] = []
     for i in range(start, n_days - 1):
         if (i - start) % hold == 0:
-            new = _pick(x[i], inu[i], q)
+            new = _pick(x[i], inu[i], q, long)
             if new.any():
                 names.append(int(np.count_nonzero(new)) // 2)
             turns.append(float(np.abs(new - w).sum()))
@@ -531,27 +539,27 @@ Pnl = tuple[np.ndarray, list[float], list[int]]
 
 def portfolio(x: np.ndarray, inu: np.ndarray, r: np.ndarray, start: int, hold: int, q: float,
               cost_bp: float, staggered: bool = False, margin: Margin | None = None,
-              stop: Stop | None = None) -> Pnl:  # fmt: skip
+              stop: Stop | None = None, long: str = "picked") -> Pnl:  # fmt: skip
     """The long-short portfolio's return each day (costs on the day they are paid), the
     weight traded at each rebalance, and the positions a side; with `margin`, each position
     on isolated margin of its size (`Margin`), or with `stop`, sold at a loss (`Stop`); each
-    staggered portfolio on its own."""
+    staggered portfolio on its own. `long`: as `_pick`."""
     if margin is not None and stop is not None:
         raise ValueError("a margin or a stop, not both")
     if margin is not None or stop is not None:
         rr = np.nan_to_num(r)
         starts = _tranches(start, hold, staggered)  # each on its own
-        _, _, turns, names = holdings(x, inu, start, hold, q, staggered)
+        _, _, turns, names = holdings(x, inu, start, hold, q, staggered, long)
         pnl, traded = np.zeros(len(r)), np.zeros(len(r))
         for s in starts:
-            held_s, _, _, _ = holdings(x, inu, s, hold, q)
+            held_s, _, _, _ = holdings(x, inu, s, hold, q, long=long)
             if margin is not None:
                 ps, ts = _isolated(held_s, rr, s, hold, margin)
             else:
                 ps, ts = _stopped(held_s, rr, s, hold, stop)
             pnl, traded = pnl + ps / len(starts), traded + ts / len(starts)
         return pnl - traded * cost_bp / 2 / 1e4, turns, names
-    held, traded, turns, names = holdings(x, inu, start, hold, q, staggered)
+    held, traded, turns, names = holdings(x, inu, start, hold, q, staggered, long)
     pnl = (held * np.nan_to_num(r)).sum(axis=1) - traded * cost_bp / 2 / 1e4
     return pnl, turns, names
 

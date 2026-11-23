@@ -1,0 +1,92 @@
+# Written on 2026-11-23, before any of its held-out days exist: they are the two years from
+# 2026-12-01, tested forward, as 011's to 014's. Everything up to 2026-10-31 has been seen.
+#
+# Where it comes from: years already seen. Over 2024-03-06 .. 2026-10-31, 011's rule at the
+# close [backtest, % of the capital a year, price and the funding received]: its longs, the
+# coins paying the least funding, were paid nearly all of it and lost more than that in price
+# (Binance -64.4 and +53.8, Bybit -63.4 and +50.1); its shorts, the coins paying the most,
+# made their money in price (Binance +39.4 and +5.6, Bybit +26.2 and +6.2). A rough look at
+# the development years only then (2020 .. 2023, nothing after them read; 011's rule an hour
+# after the close, 9 bp a round trip) [backtest]:
+#
+#                                    a year  Sharpe  p      drawdown  beta   2020  2021  2022  2023
+#   011, both legs                   +27.5%   1.27   0.007   20.9%   -0.01  +28.4 +64.8  -1.7 +18.6
+#   its long half alone              +50.5%   1.11   0.011   77.4%   +0.48
+#   its short half alone             -23.0%  -0.59   0.866  153.1%   -0.48
+#   its shorts, the rest long        +19.5%   1.20   0.009   15.0%   -0.01  +10.9 +50.2  +5.9 +10.8
+#   its shorts, BTC long              +3.9%   0.14   0.390   55.0%   -0.20
+#
+# A half alone is the market (a beta near 0.5 either way). Against the rest of the universe,
+# 011's shorts made two thirds of what 011 made, with a smaller drawdown and every
+# development year up; BTC is no hedge for shorts in small coins.
+#
+# So this is 011 with its long half in every other coin of the universe: short those paying
+# the most funding, long the rest of the 50 in equal weights. Its idea came from years
+# already seen, and only days no one has seen can show it. Its shorts are 011's; its longs,
+# the rest of each day's universe, are recorded by the shadow for this file from 2026-12-01.
+# The trials below are every rule looked at on the development years that the code can run;
+# it cannot run the long half alone, the short half alone or the shorts against BTC above,
+# nor the seven named in 013's file: ten more, named here and not counted below.
+#
+# 011 to 015 are one carry traded five ways over the same two years: their verdicts are to
+# be read together, and one confirmed alone says little.
+id: "015"
+name: xsection-carry-short
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, short those whose mean funding a day over the last 7 days is highest
+  (strictly in the top 20%) and long every other one of the 50, half the capital a side in
+  equal weights, on the days 011's rule holds a coin on each side; held 7 days as seven
+  staggered portfolios, one rebalanced every day, decided at the daily close and traded one
+  hour later; paying 9 bp a round trip on every unit traded and the funding as settled: its
+  daily net is above zero over 2026-12-01 .. 2028-11-30.
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: carry           # minus the mean of the daily funding sums over the last 7 days
+  hold: 7                 # days each portfolio is held
+  staggered: true         # seven of them, one rebalanced each day
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # the shorts: strictly below this quantile of carry
+  hours: 1                # traded this long after the daily close
+  long: rest              # the long half: every coin of the universe not shorted
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 1}
+
+trials:                   # the rules looked at before it was written
+  - {long: picked}                            # 011
+  - {long: picked, stop: 1}                   # 013
+  - {long: picked, stop: 0.5}
+  - {long: picked, isolated: 0.05}            # 012
+  - {long: picked, split: [1, 9, 17]}         # 014
+  - {long: picked, hold: 1}
+  - {long: picked, signal: mom7, hold: 1}
+  - {long: picked, signal: mom7}
+  - {long: picked, signal: mom30, hold: 1}
+  - {long: picked, signal: mom30}
+  - {long: picked, signal: rev1, hold: 1}
+  - {long: picked, hours: 0}                  # at the close
+  - {long: picked, hours: 0, isolated: 0.05}  # at the close, on margin
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20). The long half holds
+# some thirty coins where 011 holds ten: more of them change at a rebalance, and the
+# staggered portfolios trading one coin the same day are not netted: an upper bound.
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 14 trials is reported, not a bar, as for 011
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)

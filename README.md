@@ -6,8 +6,8 @@ is read, and judged once on days it has never seen.**
 [![ci](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml/badge.svg)](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
-![hypotheses](https://img.shields.io/badge/hypotheses-14%20written%2C%20failures%20kept-0b0b0b)
-![injected faults](https://img.shields.io/badge/injected%20faults-265%20caught-0b0b0b)
+![hypotheses](https://img.shields.io/badge/hypotheses-15%20written%2C%20failures%20kept-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-273%20caught-0b0b0b)
 
 From order books recorded tick by tick by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
@@ -47,6 +47,7 @@ on which days.
 | 012 | 011 with each position on isolated margin | failed on development: its liquidations cost more than its floor saved |
 | 013 | 011 with each position sold once it has lost its weight | passed development; tested forward to 2028-11-30 |
 | 014 | 011 with its capital split among the hour after each funding settlement | passed development; tested forward to 2028-11-30 |
+| 015 | 011's shorts against the rest of the universe | written; tested forward to 2028-11-30 |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -730,8 +731,14 @@ trading 1, 9 and 17 hours after the close (`split: [1, 9, 17]`), an hour after e
 three funding settlements most perpetuals have, each third held as seven staggered
 portfolios: as staggering takes the weekday out of a weekly rule, the split takes out the
 hour. Its held-out run checks the hour bars at each of the three hours before anything.
-011, 013 and 014 are one carry traded three ways over the same two years, and their
-verdicts are to be read together.
+`experiments/015-xsection-carry-short.yaml` is 011 with its long half in every other coin
+of the universe (`long: rest`, `xsection._pick`): short the coins paying the most funding,
+long the rest of the 50 in equal weights, on the days 011's rule holds a coin a side. Its
+idea came from years already seen (What has been found, below: 011's longs lost in price
+more than the funding they were paid, its shorts made its money), and a rough look at the
+development years only, written in its file, came before it. Its shorts are 011's; the
+shadow records its longs. 011 to 015 are one carry traded five ways over the same two
+years, and their verdicts are to be read together.
 `tests/test_xsection_kind.py` passes a planted carry and confirms it once, fails one where
 the funding does not last, shows the development run unchanged when the held-out prices
 are, makes the same Sharpe ratio worth less against trials that differ more, trades a rule
@@ -748,7 +755,10 @@ day, each sale paid on its day and the rebuying at the rebalance, a stop never r
 changing nothing, and seven staggered portfolios each stopped on its own days.
 `tests/test_xsection_kind.py` also splits a rule between the close and four hours after it
 on days whose move is made in their first two hours: the split is the mean of the two, and
-its held-out run stops at the hour whose bars are missing.
+its held-out run stops at the hour whose bars are missing. A rule short against the rest:
+coins tied at the short cut long with the rest, nothing on a day 011's rule would hold no
+long, each staggered portfolio with the rest long, and the shadow recording 011's shorts and
+the rest of the universe long.
 
 ### The shadow
 
@@ -766,7 +776,7 @@ first day sets, as its held-out run does. `--catch-up` also records every close 
 the last one recorded (31 at most), each from the data up to its own close, the time it
 was decided written next to it: a machine that was off catches up. `scripts/shadow_daily.sh
 SPEC ...`, from cron or the systemd user timer in `scripts/systemd/` (00:10 UTC, run at the
-next start if the machine was off), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
+next start if the machine was off; it records 011 and 015, whose longs differ), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
 `--end` of today, whose bar Binance serves while it is still open and which would stay so)
 and records the decisions. `tests/test_shadow.py` checks a decision against what the
 held-out run holds the next day, also between rebalances, and that it is the same with
@@ -793,6 +803,7 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 012 the same, each position on isolated margin | failed on development: p after Benjamini-Hochberg 0.062 (PBO 0.02, deflated Sharpe 0.54, reported); its held-out period informs, decides nothing | traded an hour after the close, +21.5% a year 2020 .. 2023, Sharpe from months 0.87, worst drawdown 28.5%, against 1.27 for 011 the same way: squeezed coins went far past their close within the day, and a position liquidated there lost what the close gave back |
 | 013 as 011, each position sold once it has lost its weight | passed on development (PBO 0.04, deflated Sharpe 0.80 against 12 trials, reported); held out forward over the same two years | traded an hour after the close, +27.7% a year 2020 .. 2023 (Sharpe from months 1.28, worst drawdown 20.9%; 2022 +0.2%), against +27.4% (1.26) for 011 the same way |
 | 014 as 011, its capital split among the hour after each funding settlement | passed on development (PBO 0.02, deflated Sharpe 0.90 against 13 trials, reported); held out forward over the same two years | +26.1% a year 2020 .. 2023 (Sharpe from months 1.24, worst drawdown 22.8%), against +27.4% (1.26) for 011, traded an hour after the close only |
+| 015 as 011, its long half the rest of the universe | written; held out forward over the same two years | |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
