@@ -1,0 +1,89 @@
+# Written on 2026-11-23, before any of its held-out days exist: they are the two years from
+# 2026-12-01, tested forward, as 011's and 012's. Everything up to 2026-10-31 has been seen.
+# A rough look (not a hypothesis) tried floors under 011's positions and filters on when it
+# trades, all traded an hour after the close [backtest, the 678 perpetuals on coins, 9 bp a
+# round trip; Sharpe from months; 2024 .. 2026 seen, so it tells what happened, not what is]:
+#
+#                                         2020 .. 2023            2024 .. 2026
+#   011, nothing                          +27.4%  1.26  dd 20.9%  +25.1%  0.65  dd 46.9%
+#   sold at a loss of its weight          +27.6%  1.27  dd 20.9%  +31.9%  0.89  dd 46.2%
+#   sold at a loss of half its weight     +25.4%  1.16  dd 25.1%  +35.8%  0.97  dd 39.2%
+#   isolated margin 1x (012) / 1.5x       0.86 / 0.91             0.68 / 0.53
+#   isolated margin 2x / 3x               1.23 / 1.26             0.52 / 0.59
+#   only when the funding spread is wide  1.41 (>= 5.6 bp a day)  0.16
+#                                         0.78 (>= 10.1 bp)       0.31
+#
+# The filter that looked best on the development years did worst after them: their thirds of
+# the spread paid 0.3, 9.9 and 15.0 bp a day, and after them 15.7, 0.5 and 4.7. Selling at
+# half a position's weight cost the development years what it gained after them. Selling at
+# all of it was sold 29 times in four development years and changed nothing there; after
+# them, 178 times, its worst day -11.2% where 011's was -19.1%. It was chosen having seen
+# those squeezes, so those years show nothing; only days no one has seen can.
+#
+# So this is 011 with a floor that does not need the exchange's margin: a position whose
+# loss since its rebalance, its funding in, reaches its own weight at a day's trading hour is
+# sold there and holds nothing until its portfolio's next rebalance. Its decisions are 011's,
+# which the shadow records; the held-out run judges it from the hour bars. The trials below
+# are every rule of the look the code can run; it cannot run the isolated margins of 1.5, 2
+# and 3 times a position, the two spread filters, or the two weightings by inverse volatility
+# looked at the day before: seven more, named here and not counted below.
+id: "013"
+name: xsection-carry-stop
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, long those whose mean funding a day over the last 7 days is lowest (strictly
+  in the bottom 20%), short those whose is highest (strictly in the top 20%), half the
+  capital a side in equal weights, held 7 days as seven staggered portfolios with a seventh
+  of the capital each, one rebalanced every day, decided at the daily close and traded one
+  hour later; a position whose loss since its rebalance, its funding in, reaches its own
+  weight at a day's trading hour sold there and nothing held in it until its portfolio's
+  next rebalance; paying 9 bp a round trip on every unit traded and the funding as settled:
+  its daily net is above zero over 2026-12-01 .. 2028-11-30.
+
+data:
+  days: {from: 2020-01-01, to: 2023-12-31}
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: carry           # minus the mean of the daily funding sums over the last 7 days
+  hold: 7                 # days each portfolio is held
+  staggered: true         # seven of them, one rebalanced each day
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # a side
+  hours: 1                # traded this long after the daily close
+  stop: 1                 # sold once it has lost its weight since its rebalance
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 1}
+
+trials:                   # the rules looked at before it was written, traded at the same hour
+  - {stop: null}          # 011
+  - {stop: 0.5}
+  - {stop: null, isolated: 0.05}   # 012
+  - {hold: 1, stop: null}
+  - {signal: mom7, hold: 1, stop: null}
+  - {signal: mom7, stop: null}
+  - {signal: mom30, hold: 1, stop: null}
+  - {signal: mom30, stop: null}
+  - {signal: rev1, hold: 1, stop: null}
+  - {hours: 0, stop: null}                   # at the close
+  - {hours: 0, stop: null, isolated: 0.05}   # at the close, on margin
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20). Staggered portfolios
+# trading one coin the same day are not netted: an upper bound. A sale at the stop pays its
+# leg, and buying back at the rebalance the other.
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 12 trials is reported, not a bar, as for 011
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)

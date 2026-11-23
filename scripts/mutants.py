@@ -1328,8 +1328,8 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "            w, alive, lost = new, np.ones(m, dtype=bool), np.zeros(m)",
-        "            w, lost = new, np.zeros(m)",
+        "            traded[i] = np.abs(new - w * alive).sum()\n            w, alive, lost = new, np.ones(m, dtype=bool), np.zeros(m)",
+        "            traded[i] = np.abs(new - w * alive).sum()\n            w, lost = new, np.zeros(m)",
         "a liquidated position out after its rebalance too",
     ),
     (
@@ -1352,8 +1352,8 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "        lost += day\n",
-        "        pass\n",
+        "        day[out] = -(size[out] + lost[out])  # what was left of its margin\n        alive &= ~out\n        lost += day\n",
+        "        day[out] = -(size[out] + lost[out])  # what was left of its margin\n        alive &= ~out\n        pass\n",
         "a position's losses forgotten the next day",
     ),
     (
@@ -1364,8 +1364,8 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "        starts = _tranches(start, hold, staggered)  # each margined on its own",
-        "        starts = _tranches(start, hold, False)  # each margined on its own",
+        "        starts = _tranches(start, hold, staggered)  # each on its own",
+        "        starts = _tranches(start, hold, False)  # each on its own",
         "a staggered rule on margin run as one portfolio",
     ),
     (
@@ -1415,6 +1415,72 @@ M = [
         '    url = urllib.parse.quote(url, safe=":/?#[]@!$&\'()*+,;=%~")',
         "    pass",
         "a symbol in Chinese letters asked for as it is",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        out = on & (lost + day <= -stop.weights * size)",
+        "        out = on & (lost + day <= -size)",
+        "a stop at the whole weight whatever it is set to",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        traded[i + 1] += size[out].sum()  # sold at the day's trading hour",
+        "        pass",
+        "a position sold at its stop for free",
+    ),
+    (
+        "marketlab/xsection.py",
+        "  # sold at the day's trading hour\n        alive &= ~out\n",
+        "  # sold at the day's trading hour\n        pass\n",
+        "a position held on past its stop",
+    ),
+    (
+        "marketlab/xsection.py",
+        "  # sold at the day's trading hour\n        alive &= ~out\n        lost += day\n",
+        "  # sold at the day's trading hour\n        alive &= ~out\n        pass\n",
+        "a position's losses forgotten by its stop",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            traded[i] += np.abs(new - w * alive).sum()",
+        "            traded[i] += np.abs(new - w).sum()",
+        "a stopped position bought back for free",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            ps, ts = _isolated(held_s, rr, s, hold, margin)\n            else:\n                ps, ts = _stopped(held_s, rr, s, hold, stop)",
+        "            ps, ts = _isolated(held_s, rr, s, hold, margin)\n            else:\n                ps, ts = _stopped(held_s, rr, start, hold, stop)",
+        "the staggered portfolios stopped on the first one's days",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    stop = xs.Stop(rule.stop) if rule.stop is not None else None",
+        "    stop = None",
+        "a rule's stop never applied",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "                                or not cut > 0):  # fmt: skip",
+        "                                or not cut >= 0):  # fmt: skip",
+        "a stop at no loss at all taken",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        if iso is not None and cut is not None:",
+        "        if False:",
+        "a margin and a stop together taken",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        cut = d.get("stop", base.stop if base else None)',
+        '        cut = d.get("stop")',
+        "a variant without the primary's stop",
+    ),
+    (
+        "marketlab/xsection.py",
+        "            traded[i] += np.abs(new - w * alive).sum()\n            w, alive, lost = new, np.ones(m, dtype=bool), np.zeros(m)",
+        "            traded[i] += np.abs(new - w * alive).sum()\n            w, lost = new, np.zeros(m)",
+        "a stopped position out after its rebalance too",
     ),
 ]
 survived = []

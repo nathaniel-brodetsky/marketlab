@@ -320,3 +320,42 @@ def test_the_committed_isolated_carry_loads():
     assert len(spec.trials) == 10 and sum(t.isolated is None for t in spec.trials) == 8
     assert (spec.holdout_first, spec.holdout_last) == (eleven.holdout_first, eleven.holdout_last)
     assert spec.min_dsr is None and spec.min_positive_years == 2 and spec.max_abs_beta == 0.3
+
+
+def test_a_rule_with_a_stop(tmp_path):
+    text = SPEC.replace("q: 0.2}", "q: 0.2, stop: 1}").replace(
+        "variants:\n  - {hold: 1}", "variants:\n  - {stop: null}")  # fmt: skip
+    spec = xk.load_spec(spec_file(tmp_path, text))
+    assert spec.primary == xk.Rule("carry", 7, 20, 0.2, 0, False, None, 1.0)
+    assert spec.variants[1].stop is None and spec.trials[1].stop == 1.0
+    assert spec.primary.name.endswith(", each position sold once it has lost its weight")
+    half = xk.load_spec(spec_file(tmp_path, text.replace("stop: 1}", "stop: 0.5}"), "033-h.yaml"))
+    assert half.primary.name.endswith("sold once it has lost 0.5 times its weight")
+    for bad in ("0", "-1", "true", "x"):
+        with pytest.raises(ex.ExperimentError, match="stop is a loss above 0"):
+            xk.load_spec(spec_file(tmp_path, text.replace("stop: 1}", f"stop: {bad}}}")))
+    with pytest.raises(ex.ExperimentError, match="isolated or stop, not both"):
+        xk.load_spec(spec_file(tmp_path, text.replace("stop: 1}", "stop: 1, isolated: 0.05}")))
+    planted(tmp_path / "d", True, seed=6)
+    never = xk.load_spec(spec_file(tmp_path, text.replace("stop: 1}", "stop: 100}"), "034-n.yaml"))
+    r = xk.run(never, tmp_path / "d", tmp_path / "r1", prov=PROV)
+    assert r.table[0]["annual_pct"] == pytest.approx(r.table[1]["annual_pct"], abs=1e-9)
+    tight = xk.load_spec(spec_file(tmp_path, text.replace("stop: 1}", "stop: 0.01}"), "035-t.yaml"))
+    r = xk.run(tight, tmp_path / "d", tmp_path / "r2", prov=PROV)
+    assert abs(r.table[0]["annual_pct"] - r.table[1]["annual_pct"]) > 1
+
+
+def test_the_committed_carry_with_a_stop_loads():
+    root = Path(__file__).resolve().parents[1] / "experiments"
+    spec = xk.load_spec(root / "013-xsection-carry-stop.yaml")
+    assert spec.primary == xk.Rule("carry", 7, 50, 0.2, 1, True, None, 1.0)
+    assert spec.primary.name.endswith("traded 1 h after the close, each position sold once it "
+                                      "has lost its weight")  # fmt: skip
+    assert [(v.hold, v.staggered, v.stop) for v in spec.variants] == [(7, True, 1.0),
+                                                                      (1, False, 1.0)]  # fmt: skip
+    eleven = xk.load_spec(root / "011-xsection-carry-forward.yaml")
+    twelve = xk.load_spec(root / "012-xsection-carry-isolated.yaml")
+    assert spec.trials[1] == eleven.primary and twelve.primary in spec.trials
+    assert len(spec.trials) == 12 and all(t.hours in (0, 1) for t in spec.trials)
+    assert (spec.holdout_first, spec.holdout_last) == (eleven.holdout_first, eleven.holdout_last)
+    assert spec.min_dsr is None and spec.min_positive_years == 2 and spec.max_abs_beta == 0.3

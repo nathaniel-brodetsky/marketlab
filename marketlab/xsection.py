@@ -493,23 +493,62 @@ def _isolated(held: np.ndarray, r: np.ndarray, start: int, hold: int,
     return pnl, traded
 
 
+@dataclass
+class Stop:
+    """A position whose loss since its rebalance, its funding in, reaches `weights` times its
+    own weight at the end of a day (the day's return ends at its trading hour) is sold there,
+    at that hour's price, paying for the sale, and holds nothing until its portfolio's next
+    rebalance."""
+
+    weights: float
+
+
+def _stopped(held: np.ndarray, r: np.ndarray, start: int, hold: int,
+             stop: Stop) -> tuple[np.ndarray, np.ndarray]:  # fmt: skip
+    """One portfolio's `held` (rebalanced every `hold` days from `start`) with a stop: its
+    return each day and the weight it traded."""
+    n, m = held.shape
+    pnl, traded = np.zeros(n), np.zeros(n)
+    w, alive, lost = np.zeros(m), np.ones(m, dtype=bool), np.zeros(m)
+    for i in range(start, n - 1):
+        if (i - start) % hold == 0:
+            new = held[i + 1]
+            traded[i] += np.abs(new - w * alive).sum()
+            w, alive, lost = new, np.ones(m, dtype=bool), np.zeros(m)
+        size = np.abs(w)
+        on = alive & (w != 0)
+        day = np.where(on, w * r[i + 1], 0.0)
+        out = on & (lost + day <= -stop.weights * size)
+        traded[i + 1] += size[out].sum()  # sold at the day's trading hour
+        alive &= ~out
+        lost += day
+        pnl[i + 1] = day.sum()
+    return pnl, traded
+
+
 Pnl = tuple[np.ndarray, list[float], list[int]]
 
 
 def portfolio(x: np.ndarray, inu: np.ndarray, r: np.ndarray, start: int, hold: int, q: float,
-              cost_bp: float, staggered: bool = False,
-              margin: Margin | None = None) -> Pnl:  # fmt: skip
-    """The long-short portfolio's return each day (costs on the day of the rebalance), the
+              cost_bp: float, staggered: bool = False, margin: Margin | None = None,
+              stop: Stop | None = None) -> Pnl:  # fmt: skip
+    """The long-short portfolio's return each day (costs on the day they are paid), the
     weight traded at each rebalance, and the positions a side; with `margin`, each position
-    on isolated margin of its size (`Margin`), each staggered portfolio on its own."""
-    if margin is not None:
+    on isolated margin of its size (`Margin`), or with `stop`, sold at a loss (`Stop`); each
+    staggered portfolio on its own."""
+    if margin is not None and stop is not None:
+        raise ValueError("a margin or a stop, not both")
+    if margin is not None or stop is not None:
         rr = np.nan_to_num(r)
-        starts = _tranches(start, hold, staggered)  # each margined on its own
+        starts = _tranches(start, hold, staggered)  # each on its own
         _, _, turns, names = holdings(x, inu, start, hold, q, staggered)
         pnl, traded = np.zeros(len(r)), np.zeros(len(r))
         for s in starts:
             held_s, _, _, _ = holdings(x, inu, s, hold, q)
-            ps, ts = _isolated(held_s, rr, s, hold, margin)
+            if margin is not None:
+                ps, ts = _isolated(held_s, rr, s, hold, margin)
+            else:
+                ps, ts = _stopped(held_s, rr, s, hold, stop)
             pnl, traded = pnl + ps / len(starts), traded + ts / len(starts)
         return pnl - traded * cost_bp / 2 / 1e4, turns, names
     held, traded, turns, names = holdings(x, inu, start, hold, q, staggered)

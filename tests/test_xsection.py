@@ -555,3 +555,47 @@ def test_staggered_portfolios_are_liquidated_each_on_its_own():
     assert capped[10] == pytest.approx(-0.25) and plain[10] == pytest.approx(-0.375)
     assert capped[11:18] == pytest.approx(-np.arange(1, 8) / 7 * 0.25 * 0.1)
     assert plain[11:18] == pytest.approx(np.full(7, -0.025))
+
+
+def test_a_stop_sells_a_position_that_has_lost_its_weight():
+    x, inu, r, _, _ = margin_case()
+    r[2, 0], r[3, 0] = 0.6, 0.5  # the short 0 loses 0.15 and then 0.125: past its 0.25
+    r[4, 0] = 1.0  # held no more
+    r[5, 9], r[6, 9] = -0.99, -0.1  # the long 9 loses 0.2475, not quite all, then the rest
+    r[7, 9] = 0.5  # held no more
+    r[8, 0] = 0.2  # rebalanced at day 7's close: the short 0 held again
+    stop = xs.Stop(1.0)
+    cut, turns, names = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0, stop=stop)
+    plain, turns0, names0 = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0)
+    want = np.zeros(12)
+    want[[2, 3, 5, 6, 8]] = [-0.15, -0.125, -0.2475, -0.025, -0.05]
+    assert cut == pytest.approx(want)
+    assert plain[[4, 7]] == pytest.approx([-0.25, 0.125])
+    assert turns == turns0 and names == names0
+    # each sale paid on its day, and the two bought back at the rebalance
+    paid, _, _ = xs.portfolio(x, inu, r, 0, 7, 0.2, 10.0, stop=stop)
+    fee = np.zeros(12)
+    fee[[0, 3, 6, 7]] = [1.0, 0.25, 0.25, 0.5]
+    assert cut - paid == pytest.approx(fee * 5e-4)
+    # at half its weight the short goes after day 2 and the long after day 5
+    half, _, _ = xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0, stop=xs.Stop(0.5))
+    assert half[[3, 6]] == pytest.approx([0.0, 0.0])
+    with pytest.raises(ValueError, match="a margin or a stop, not both"):
+        xs.portfolio(x, inu, r, 0, 7, 0.2, 0.0, margin=xs.Margin(r, r, 0.05), stop=stop)
+
+
+def test_a_stop_never_reached_changes_nothing_and_staggered_ones_stop_on_their_own():
+    rng = np.random.default_rng(5)
+    x = rng.normal(size=(60, 20))
+    inu = np.ones_like(x, dtype=bool)
+    r = rng.normal(0, 0.05, x.shape)
+    for hold, stag in ((1, False), (7, False), (7, True)):
+        a = xs.portfolio(x, inu, r, 3, hold, 0.2, 9.0, stag)
+        b = xs.portfolio(x, inu, r, 3, hold, 0.2, 9.0, stag, stop=xs.Stop(100.0))
+        assert np.allclose(a[0], b[0], rtol=0, atol=1e-15) and a[1:] == b[1:]
+    # seven portfolios, each with the stop its own days give it
+    tight = xs.Stop(0.1)
+    both, _, _ = xs.portfolio(x, inu, r, 3, 7, 0.2, 9.0, True, stop=tight)
+    each = [xs.portfolio(x, inu, r, 3 + k, 7, 0.2, 9.0, stop=tight)[0] for k in range(7)]
+    assert np.allclose(both, sum(each) / 7, rtol=0, atol=1e-15)
+    assert not np.allclose(both, xs.portfolio(x, inu, r, 3, 7, 0.2, 9.0, True)[0])

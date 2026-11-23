@@ -8,7 +8,8 @@ with a close on that day and 30 days before); long those strictly above the sign
 equal weights, rebalanced every `hold` days at the day's close; `round_trip_bp` on every
 unit of weight traded, the funding paid or received in the P&L. It may be traded `hours`
 after the close, held as `hold` staggered portfolios, and hold each position on isolated
-margin of its own size (`isolated`, the maintenance rate: `xsection.Margin`).
+margin of its own size (`isolated`, the maintenance rate: `xsection.Margin`) or sell it
+once it has lost a given share of its weight (`stop`: `xsection.Stop`).
 
 The development run scores the primary and its variants on the development days: the
 daily net, in bp of the capital, tested for a mean above zero with Newey-West errors and
@@ -52,6 +53,8 @@ class Rule:
     # each position on isolated margin of its size, liquidated at this maintenance rate
     # (xsection.Margin), from hourly bars; None: on the whole capital, as a portfolio
     isolated: float | None = None
+    # each position sold once it has lost this many times its weight (xsection.Stop)
+    stop: float | None = None
 
     @property
     def name(self) -> str:
@@ -59,8 +62,12 @@ class Rule:
         tranches = f", as {self.hold} staggered portfolios" if self.staggered else ""
         margin = (f", each position on isolated margin (maintenance {self.isolated:.1%})"
                   if self.isolated is not None else "")  # fmt: skip
+        stop = ""
+        if self.stop is not None:
+            lost = "its weight" if self.stop == 1 else f"{self.stop:g} times its weight"
+            stop = f", each position sold once it has lost {lost}"
         return (f"{self.signal}, every {self.hold} days, top {self.top}, {self.q:.0%} a side"
-                + tranches + late + margin)  # fmt: skip
+                + tranches + late + margin + stop)  # fmt: skip
 
 
 @dataclass(frozen=True)
@@ -133,9 +140,19 @@ def load_spec(path: str | Path) -> Spec:
                                 or not 0 <= iso < 1):  # fmt: skip
             raise ex.ExperimentError(f"{path}: isolated is a maintenance rate from 0 to 1 "
                                      f"(0.05 for 5%), or null; not {iso!r}")  # fmt: skip
+        # stop: the loss, in the position's weights, at which it is sold, or null
+        cut = d.get("stop", base.stop if base else None)
+        if cut is not None and (isinstance(cut, bool) or not isinstance(cut, int | float)
+                                or not cut > 0):  # fmt: skip
+            raise ex.ExperimentError(
+                f"{path}: stop is a loss above 0, in the position's weights (1 for all of it),"
+                f" or null; not {cut!r}")  # fmt: skip
+        if iso is not None and cut is not None:
+            raise ex.ExperimentError(f"{path}: isolated or stop, not both, in a rule")
         r = Rule(str(get("signal")), int(get("hold")), int(get("top", 50)), float(get("q", 0.2)),
                  int(get("hours", 0)), stag and int(get("hold")) > 1,
-                 None if iso is None else float(iso))  # fmt: skip
+                 None if iso is None else float(iso),
+                 None if cut is None else float(cut))  # fmt: skip
         if r.signal not in xs.SIGNALS:
             raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of {xs.SIGNALS}")
         if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
@@ -224,11 +241,13 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
     if "x" not in cache:
         cache["x"] = xs.signals(p)
     r, margin = _returns(p, rule, cache, root, held_out)
+    stop = xs.Stop(rule.stop) if rule.stop is not None else None
     inu, x = cache[rule.top], cache["x"][rule.signal]
     start = p.dates.index(first)
     pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,
-                                 margin)  # fmt: skip
-    gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered, margin)
+                                 margin, stop)  # fmt: skip
+    gross, _, _ = xs.portfolio(x, inu, r, start, rule.hold, rule.q, 0.0, rule.staggered, margin,
+                               stop)  # fmt: skip
     held, _, _, _ = xs.holdings(x, inu, start, rule.hold, rule.q, rule.staggered)
     on = held[start:] != 0
     mkt = xs.market(inu, r, start)
