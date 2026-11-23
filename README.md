@@ -42,11 +42,11 @@ on which days.
 | 007 | trade flow pays a taker's 9 bp | failed: 3.1 ± 1.0 bp at best |
 | 008 | BTC spot against its perpetual, for the funding | confirmed: 6.0% a year of the notional, 2024 .. 2026 |
 | 009 | funding carry across coins | confirmed at p 0.0499, then shown to be its start day's luck |
-| 010 | momentum across coins | failed: PBO 0.55 |
+| 010 | momentum across coins | failed: PBO 0.55; held out 2024 .. 2026, not confirmed (p 0.157) |
 | 011 | the carry as seven staggered portfolios | passed development; tested forward to 2028-11-30 |
 | 012 | 011 with each position on isolated margin | failed on development: its liquidations cost more than its floor saved |
 | 013 | 011 with each position sold once it has lost its weight | passed development; tested forward to 2028-11-30 |
-| 014 | 011 with its capital split among the hour after each funding settlement | written; tested forward to 2028-11-30 |
+| 014 | 011 with its capital split among the hour after each funding settlement | passed development; tested forward to 2028-11-30 |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -788,11 +788,11 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 007 trade flow against a taker's 9 bp | failed on development, held-out months not opened | best 3.1 +- 1.0 bp a trade (60 min) |
 | 008 funding carry, spot against the perpetual | passed, held out confirmed | 13.9% a year of the notional 2020 .. 2023 (16.6, 29.8, 2.1, 6.9 by year), 6.0% over January 2024 .. October 2026; holding always 6.9% |
 | 009 funding carry across coins | passed on development (deflated Sharpe 0.50, reported); held out confirmed, p 0.0499, but by its rebalance day's luck (below) | +36.4% a year 2020 .. 2023, Sharpe from months 1.42; held out +46.7% (Sharpe 1.16, worst drawdown 50.5%), the other six days of the week from +4.7% to +56.3% |
-| 010 momentum across coins, an hour after the close | failed on development: PBO 0.55 over its 3 variants; its held-out period informs, decides nothing | +50.5% a year 2020 .. 2023, Sharpe from months 1.40, p after BH 0.004 |
+| 010 momentum across coins, an hour after the close | failed on development: PBO 0.55 over its 3 variants; its held-out period, opened once, informs, decides nothing: not confirmed | +50.5% a year 2020 .. 2023, Sharpe from months 1.40, p after BH 0.004; held out, January 2024 .. October 2026, +33.4% a year (Sharpe from months 0.66, worst drawdown 55.6%, beta -0.01, p 0.157), by year +1.1, +51.2 and +42.2% |
 | 011 funding carry across coins, staggered, an hour after the close | passed on development (PBO 0.03, deflated Sharpe 0.76, reported); held out forward, 2026-12-01 .. 2028-11-30, recorded day by day by the shadow | at the close, +29.2% a year 2020 .. 2023 (Sharpe from months 1.34), +27.4% 2024 .. 2026 (0.73, p 0.126, worst drawdown 42.5%) |
 | 012 the same, each position on isolated margin | failed on development: p after Benjamini-Hochberg 0.062 (PBO 0.02, deflated Sharpe 0.54, reported); its held-out period informs, decides nothing | traded an hour after the close, +21.5% a year 2020 .. 2023, Sharpe from months 0.87, worst drawdown 28.5%, against 1.27 for 011 the same way: squeezed coins went far past their close within the day, and a position liquidated there lost what the close gave back |
 | 013 as 011, each position sold once it has lost its weight | passed on development (PBO 0.04, deflated Sharpe 0.80 against 12 trials, reported); held out forward over the same two years | traded an hour after the close, +27.7% a year 2020 .. 2023 (Sharpe from months 1.28, worst drawdown 20.9%; 2022 +0.2%), against +27.4% (1.26) for 011 the same way |
-| 014 as 011, its capital split among the hour after each funding settlement | written; held out forward over the same two years | |
+| 014 as 011, its capital split among the hour after each funding settlement | passed on development (PBO 0.02, deflated Sharpe 0.90 against 13 trials, reported); held out forward over the same two years | +26.1% a year 2020 .. 2023 (Sharpe from months 1.24, worst drawdown 22.8%), against +27.4% (1.26) for 011, traded an hour after the close only |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
