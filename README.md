@@ -849,6 +849,24 @@ was the worst on the years after, which is what writing a hypothesis down first 
 BTC's trend over 30 days split the days no better: the carry paid in both before 2024 and
 lost 7.5 bp a day with BTC down after it.
 
+The same carry on a second exchange [backtest, a rough look, not a hypothesis: Bybit's USDT
+perpetuals on coins from `fetch_bybit.py`, 011's rule at the close, 2024-03-06 .. 2026-10-31,
+years already seen on Binance]: +16.9% a year at 9 bp a round trip (Sharpe from months 0.46,
+p 0.248, worst drawdown 55.8%), +16.4% at Bybit's taker fee of 11 bp, against +32.3% (0.84,
+p 0.100, 42.5%) on Binance over the same days. Their days correlate at 0.76, and the coins
+both hold rank alike by carry (0.88): one trade, not a second confirmation of it. Crossed,
+Binance's picks held at Bybit's returns made +18.6% and Bybit's at Binance's +22.2%. Of the
+13.7 points a year Binance's picks lose at Bybit's returns, 9.3 are coins Bybit gives no
+bars for on most of the days they were held (not listed there, or under another name;
+small coins shorted on Binance, SKYAI, PLAY, BULLA and AGT the largest), the rest the prices
+and funding of the coins both list. By leg, the funding received was nearly the same, +59%
+of the capital a year on Binance and +56% on Bybit, nearly all of it paid to the longs,
+whose prices cost 64% a year on both; the shorts' prices made +39% and +26%. In those years
+the carry earned as a short of the coins paying the most funding, not by the funding it
+collected; and Binance's +34.5% a year before costs came from ten of the 400 coins it held
+(+41.4; the other 390, -6.9), ALPACA, SIREN, GOAT, PIPPIN and RIVER the largest. What two
+years forward show of 011 will turn on a few such coins.
+
 Erratum: the comment in `experiments/007-flow-beats-cost.yaml` calls the days of
 Tardis.dev's recording futures days. They are Binance spot BTCUSDT. The hypothesis is left
 as committed; leaving those days out of its held-out months holds either way.
