@@ -1530,6 +1530,60 @@ M = [
         "                len(set(hrs)) != len(hrs)",
         "a split of one hour taken",
     ),
+    (
+        "scripts/fetch_bybit.py",
+        '                        and s.get("status") == status):  # fmt: skip',
+        "                        ):  # fmt: skip",
+        "Bybit: a contract pending its opening taken for a delisted one",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        '    for status in ("Closed", "Trading"):  # the trading one written over the closed',
+        '    for status in ("Trading", "Closed"):  # the trading one written over the closed',
+        "Bybit: a perpetual listed again kept as delisted",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        "        if len(rows) < BAR_PAGE:\n            break\n        oldest",
+        "        if len(rows) <= BAR_PAGE:\n            break\n        oldest",
+        "Bybit: the daily bars stop at their first page",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        '                got[t] = [str(t), r[1], r[2], r[3], r[4], r[5], r[6], ""]',
+        '                got[t] = [str(t), r[1], r[2], r[3], r[4], r[5], r[5], ""]',
+        "Bybit: the volume in coins taken for the turnover",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        "        if oldest <= start:\n            break\n        hi = oldest - 1",
+        "        hi = oldest - 1",
+        "Bybit: the funding paged back past what is kept",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        "            start = max(lo, int(have[-1][0]) + DAY) if have else lo",
+        "            start = max(lo, int(have[-1][0])) if have else lo",
+        "Bybit: the last bar kept asked for again",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        '            if code == INVALID and "symbol" in str(d.get("retMsg")).lower():',
+        '            if code == INVALID and "symbol" in str(d.get("retMsg")):',
+        "Bybit: a symbol it refuses taken for a failure",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        "RETRY = {10002, 10006, 10016}  # request expired, too many visits, server error",
+        "RETRY = {10002, 10016}  # request expired, too many visits, server error",
+        "Bybit: a rate limit not retried",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        "            if not rows:\n                unserved.append(sym)",
+        "            if False:\n                unserved.append(sym)",
+        "Bybit: a delisted coin with no bars written as an empty file",
+    ),
 ]
 survived = []
 for f, old, new, label in M:
