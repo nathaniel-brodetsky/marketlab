@@ -1584,6 +1584,24 @@ M = [
         "            if False:\n                unserved.append(sym)",
         "Bybit: a delisted coin with no bars written as an empty file",
     ),
+    (
+        "scripts/fetch_bybit.py",
+        'COINS = ("", "innovation")  # Bybit\'s symbolType of a coin\'s perpetual',
+        "COINS = (\"\",)  # Bybit's symbolType of a coin's perpetual",
+        "Bybit: a coin in its innovation zone taken for something else",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        '    if s["symbol"] in NOT_COINS:\n        return NOT_COINS[s["symbol"]]\n',
+        "",
+        "Bybit: a stablecoin taken for a coin",
+    ),
+    (
+        "scripts/fetch_bybit.py",
+        '    closed = [s for s in syms if s["status"] == "Closed" and s["underlying_type"] == "COIN"]',
+        '    closed = [s for s in syms if s["status"] == "Closed"]',
+        "Bybit: a delisted stock listed among the delisted coins",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

@@ -116,13 +116,19 @@ def test_every_perpetual_trading_or_delisted_and_their_days(bybit, tmp_path, cap
         _perp("RELUSDT", "Closed"),  # delisted, then listed again under the same name
         _perp("RELUSDT", "Trading"),
         _perp("BADUSDT", "Trading"),  # listed, but its symbol refused
+        _perp("NEWCOINUSDT", "Trading", symbolType="innovation"),  # a new coin's
+        _perp("AMZNUSDT", "Trading", symbolType="stock"),  # not a coin's
+        _perp("GMESTOCKUSDT", "Closed", symbolType="stock"),  # not a coin's, delisted
+        _perp("USDCUSDT", "Trading"),  # a stablecoin, which Bybit types as a coin
         _perp("NEWUSDT", "PendingOpen"),
         _perp("PREUSDT", "PreLaunch"),
         _perp("BTCPERP", "Trading", quoteCoin="USDC"),
         _perp("AAAUSDT-26DEC25", "Trading", contractType="LinearFutures"),
     ]
     bybit.klines = {"AAAUSDT": _bars("2020-03-25", 10), "LUNAUSDT": _bars("2020-03-28", 5),
-                    "RELUSDT": _bars("2020-04-01", 3)}  # fmt: skip
+                    "RELUSDT": _bars("2020-04-01", 3), "NEWCOINUSDT": _bars("2020-04-02", 2),
+                    "AMZNUSDT": _bars("2020-03-25", 10), "GMESTOCKUSDT": _bars("2020-03-25", 4),
+                    "USDCUSDT": _bars("2020-03-25", 10)}  # fmt: skip
     bybit.funding = {"AAAUSDT": _settlements("2020-03-25", 30),
                      "LUNAUSDT": _settlements("2020-03-28", 13, every_h=4)}  # fmt: skip
     bybit.invalid.add("BADUSDT")
@@ -131,16 +137,24 @@ def test_every_perpetual_trading_or_delisted_and_their_days(bybit, tmp_path, cap
             "--base-url", bybit.url, "--pause", "0"]  # fmt: skip
     assert fb.main(args) == 0
     out = capsys.readouterr().out
-    assert "5 USDT perpetuals on Bybit: Closed 2, Trading 3" in out
+    assert "9 USDT perpetuals on Bybit: Closed 3, Trading 6;" in out
+    assert "underlying COIN 6, STABLE 1, STOCK 2" in out
     assert "BADUSDT" in out and "no data served" in out
     assert "OLDUSDT" in out and "no bars served" in out
-    assert "no bars served for 2 (1 of the 2 delisted)" in out
+    assert "no bars served for 2 (1 of the 2 delisted coins)" in out
     um = tmp_path / "um"
+    t = _ms("2020-03-25")
     assert (um / "universe.csv").read_text().splitlines() == [
         "symbol,status,onboard_date,base,quote,underlying_type",
-        f"AAAUSDT,Trading,{_ms('2020-03-25')},AAA,USDT,",
-        f"BADUSDT,Trading,{_ms('2020-03-25')},BAD,USDT,",
-        f"RELUSDT,Trading,{_ms('2020-03-25')},REL,USDT,",
+        f"AAAUSDT,Trading,{t},AAA,USDT,COIN",
+        f"AMZNUSDT,Trading,{t},AMZN,USDT,STOCK",
+        f"BADUSDT,Trading,{t},BAD,USDT,COIN",
+        f"GMESTOCKUSDT,Closed,{t},GMESTOCK,USDT,STOCK",
+        f"LUNAUSDT,Closed,{t},LUNA,USDT,COIN",
+        f"NEWCOINUSDT,Trading,{t},NEWCOIN,USDT,COIN",
+        f"OLDUSDT,Closed,{t},OLD,USDT,COIN",
+        f"RELUSDT,Trading,{t},REL,USDT,COIN",
+        f"USDCUSDT,Trading,{t},USDC,USDT,STABLE",
     ]
     assert (um / "gone.csv").read_text().splitlines() == [
         "symbol,status,onboard_date,delivery_date,base,quote",
@@ -148,7 +162,8 @@ def test_every_perpetual_trading_or_delisted_and_their_days(bybit, tmp_path, cap
         f"OLDUSDT,Closed,{_ms('2020-03-25')},0,OLD,USDT",
     ]
     assert sorted(f.name for f in (um / "klines1d").iterdir()) == [
-        "AAAUSDT.csv", "LUNAUSDT.csv", "RELUSDT.csv"]  # fmt: skip
+        "AAAUSDT.csv", "AMZNUSDT.csv", "GMESTOCKUSDT.csv", "LUNAUSDT.csv", "NEWCOINUSDT.csv",
+        "RELUSDT.csv", "USDCUSDT.csv"]  # fmt: skip
     a = (um / "klines1d" / "AAAUSDT.csv").read_text().splitlines()
     assert a[0] == "open_time,open,high,low,close,volume,quote_volume,trades"
     assert a[1] == f"{_ms('2020-03-25')},1,2,0.5,100,10,1000.5,"  # oldest first, turnover
@@ -159,9 +174,12 @@ def test_every_perpetual_trading_or_delisted_and_their_days(bybit, tmp_path, cap
     assert f[1] == f"{_ms('2020-03-25')},0.00010000," and f[3].split(",")[1] == "0.00030000"
     # the paging went back past the first settlement, to an empty page
     assert len(_asked(bybit, "/v5/market/funding/history", "AAAUSDT")) == 1 + 30 // 3 + 1
-    # read as binance-data is: every day's funding summed, the delisted coin in the panel
+    # read as binance-data is: every day's funding summed, the delisted coin in the panel,
+    # what is not a coin's left out and named
     p = xs.load(tmp_path, "2020-04-01", "2020-04-03", held_out=True)
-    assert p.symbols == ["AAAUSDT", "LUNAUSDT", "RELUSDT"]
+    assert p.symbols == ["AAAUSDT", "LUNAUSDT", "NEWCOINUSDT", "RELUSDT"]
+    assert p.other_type == {"AMZNUSDT": "STOCK", "GMESTOCKUSDT": "STOCK", "USDCUSDT": "STABLE"}
+    assert p.unlisted == []
     i, j = p.dates.index("2020-03-26"), p.symbols.index("AAAUSDT")
     assert p.close[i, j] == 101 and p.qvol[i, j] == 1001.5
     assert p.funding[i, j] == pytest.approx(1e-4 * (1 + 2 + 3))  # settlements 3, 4, 5

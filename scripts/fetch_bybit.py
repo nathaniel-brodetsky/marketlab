@@ -7,14 +7,18 @@ Standard library only, Python 3.9 or newer, any OS.
     python3 fetch_bybit.py --start 2020-01-01 --end 2026-10-31 --out bybit-data
 
 1. GET /v5/market/instruments-info, category linear, status Trading and then Closed, a
-   cursor a page: every perpetual quoted in USDT. Those trading go into OUT/um/universe.csv,
-   the closed ones into OUT/um/gone.csv, so that the coins Bybit has delisted stay in the
-   universe. Bybit gives no underlying's type: every perpetual is taken for a coin's, but
-   those marketlab.xsection.NOT_COINS names.
+   cursor a page: every perpetual quoted in USDT, of either status, into OUT/um/universe.csv
+   with the type of its underlying, and the closed ones on coins again into OUT/um/gone.csv,
+   so that the coins Bybit has delisted stay in the universe. The type is Bybit's
+   symbolType: none, or "innovation" (its zone for new coins), is a coin; the others it
+   gives (stock, ETF, commodity, forex) are not. Stablecoins and the ETH/BTC ratio, which
+   it types as coins, are named in NOT_COINS here.
 2. GET /v5/market/kline, interval D, newest first, 1000 a request:
    OUT/um/klines1d/<SYMBOL>.csv with Binance's columns; quote_volume is Bybit's turnover,
    and trades, which Bybit does not give, is left empty. A perpetual Bybit serves no bars
-   of is reported and left without a file.
+   of is reported and left without a file. Bybit serves a delisted perpetual's bars from
+   2024-02-05 on only (none before, as downloaded on 2026-11-23): its earlier years hold
+   the coins that survived them.
 3. GET /v5/market/funding/history, newest first, 200 a request:
    OUT/um/fundingRate/<SYMBOL>/<SYMBOL>-fundingRate.csv (mark_price left empty).
 
@@ -50,6 +54,12 @@ BAR_PAGE, FUNDING_PAGE = 1000, 200
 GONE_COLUMNS = ("symbol", "status", "onboard_date", "delivery_date", "base", "quote")
 RETRY = {10002, 10006, 10016}  # request expired, too many visits, server error
 INVALID = 10001  # params error: what Bybit says of a symbol it does not serve
+COINS = ("", "innovation")  # Bybit's symbolType of a coin's perpetual
+# what Bybit types as a coin and is not a coin's own price (named as of 2026-11-23)
+NOT_COINS = {"USDCUSDT": "STABLE", "USDEUSDT": "STABLE", "USD1USDT": "STABLE",
+             "RLUSDUSDT": "STABLE", "FDUSDUSDT": "STABLE", "BUSDUSDT": "STABLE",
+             "USTUSDT": "STABLE", "ETHBTCUSDT": "INDEX", "PAXGUSDT": "COMMODITY",
+             "XAUTUSDT": "COMMODITY"}  # fmt: skip
 
 
 class NotServed(RuntimeError):
@@ -86,6 +96,15 @@ def call(base: str, path: str, tries: int, timeout: float, **q) -> dict:
     raise AssertionError("unreachable")
 
 
+def underlying(s: dict) -> str:
+    """COIN, or the type of what else a perpetual is on: Bybit's symbolType, in capitals, or
+    NOT_COINS's."""
+    if s["symbol"] in NOT_COINS:
+        return NOT_COINS[s["symbol"]]
+    kind = s.get("symbolType") or ""
+    return "COIN" if kind in COINS else kind.upper()
+
+
 def instruments(base: str, quote: str, tries: int, timeout: float) -> list[dict]:
     """Every perpetual quoted in `quote` Bybit lists as trading or closed; one trading under
     a name also closed earlier is kept as trading."""
@@ -104,7 +123,8 @@ def instruments(base: str, quote: str, tries: int, timeout: float) -> list[dict]
                         "symbol": s["symbol"], "status": status,
                         "onboard_date": int(s.get("launchTime") or 0),
                         "delivery_date": int(s.get("deliveryTime") or 0),
-                        "base": s.get("baseCoin", ""), "quote": quote, "underlying_type": "",
+                        "base": s.get("baseCoin", ""), "quote": quote,
+                        "underlying_type": underlying(s),
                     }  # fmt: skip
             cursor = res.get("nextPageCursor") or ""
             if not cursor or not res.get("list"):
@@ -194,12 +214,12 @@ def main(argv: list[str] | None = None) -> int:
         wanted = {s.upper() for s in a.symbols}
         syms = [s for s in syms if s["symbol"] in wanted]
     um = a.out / "um"
-    trading = [s for s in syms if s["status"] == "Trading"]
-    closed = [s for s in syms if s["status"] == "Closed"]
+    closed = [s for s in syms if s["status"] == "Closed" and s["underlying_type"] == "COIN"]
     fu.write_rows(um / "universe.csv", fu.UNIVERSE_COLUMNS,
-                  [[s[c] for c in fu.UNIVERSE_COLUMNS] for s in trading])  # fmt: skip
+                  [[s[c] for c in fu.UNIVERSE_COLUMNS] for s in syms])  # fmt: skip
     fu.write_rows(um / "gone.csv", GONE_COLUMNS, [[s[c] for c in GONE_COLUMNS] for s in closed])
-    print(f"{len(syms)} {a.quote} perpetuals on Bybit: {fu._counts(syms, 'status')}")
+    print(f"{len(syms)} {a.quote} perpetuals on Bybit: {fu._counts(syms, 'status')}; "
+          f"underlying {fu._counts(syms, 'underlying_type')}", flush=True)  # fmt: skip
     if a.list_only:
         print(f"the lists -> {um}")
         return 0
@@ -243,7 +263,7 @@ def main(argv: list[str] | None = None) -> int:
     gone = {s["symbol"] for s in closed}
     print(f"done: {len(syms) - len(failed) - len(unserved)} of {len(syms)} perpetuals -> {um}; "
           f"no bars served for {len(unserved)} ({len(gone & set(unserved))} of the "
-          f"{len(gone)} delisted)")  # fmt: skip
+          f"{len(gone)} delisted coins)")  # fmt: skip
     if failed:
         print(f"FAILED: {', '.join(failed)}", file=sys.stderr)
     return 1 if failed else 0

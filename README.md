@@ -7,7 +7,7 @@ is read, and judged once on days it has never seen.**
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
 ![hypotheses](https://img.shields.io/badge/hypotheses-14%20written%2C%20failures%20kept-0b0b0b)
-![injected faults](https://img.shields.io/badge/injected%20faults-262%20caught-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-265%20caught-0b0b0b)
 
 From order books recorded tick by tick by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
@@ -898,12 +898,17 @@ not match is reported, not guessed at.
 
 `python scripts/fetch_bybit.py --start 2020-01-01 --end 2026-10-31 --out bybit-data`
 writes the same files from Bybit's public v5 API, so that what follows reads `--data
-bybit-data` as it reads binance-data: every USDT perpetual Bybit lists as trading
-(`um/universe.csv`) or as closed (`um/gone.csv`; Bybit keeps listing its delisted
-perpetuals, LUNA and FTT among them), its daily bars (the quote volume is Bybit's turnover)
-and its funding history, which goes back to 2020-03-25 for BTCUSDT. A delisted perpetual
-Bybit serves no bars of is reported and left without a file. Bybit gives no underlying's
-type, so every perpetual counts as a coin's, but the seven contracts named below.
+bybit-data` as it reads binance-data: every USDT perpetual Bybit lists, trading or closed
+(Bybit keeps listing its delisted perpetuals, LUNA and FTT among them), with the type of its
+underlying (`um/universe.csv`), and the closed ones on coins again (`um/gone.csv`); their
+daily bars (the quote volume is Bybit's turnover) and funding history, which goes back to
+2020-03-25 for BTCUSDT. The type is Bybit's own (`symbolType`): of the 1,155 listed on
+2026-11-23, 248 are on shares, 62 on funds, 4 on commodities and 4 on currency pairs;
+stablecoins and the ETH/BTC ratio, which Bybit types as coins, are named in the script.
+A delisted perpetual Bybit serves no bars of is reported and left without a file, and it
+serves those of a delisted one from 2024-02-05 on only: before that day its list holds
+only the coins that survived, so a look across Bybit starts in March 2024, when the coins
+delisted since have the 30 days of bars the universe asks for.
 
 `marketlab xsection --data binance-data` then looks, cheaply, at four cross-sectional
 signals: momentum over 7 and 30 days, the last day's reversal, and funding carry (minus the
