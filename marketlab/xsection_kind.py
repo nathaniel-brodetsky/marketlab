@@ -196,6 +196,25 @@ class Days:
 MIN_PRICED = 0.98
 
 
+def _returns(p: xs.Panel, rule: Rule, cache: dict, root: str | Path | None,
+             held_out: bool) -> tuple[np.ndarray, xs.Margin | None]:  # fmt: skip
+    """A rule's daily returns, and its margin if it holds each position on isolated margin:
+    at the close from the daily bars; from the hour bars under `root` for a rule traded hours
+    after the close or on margin. `cache` keeps them for the rules that share them."""
+    if rule.hours == 0 and rule.isolated is None:
+        if "r0" not in cache:
+            cache["r0"] = xs.daily_returns(p)
+        return cache["r0"], None
+    key = ("lag", rule.hours)
+    if key not in cache:
+        cache[key] = xs.lagged(p, root, [rule.hours], held_out)[rule.hours]
+    lag = cache[key]
+    margin = None
+    if rule.isolated is not None:
+        margin = xs.Margin(lag.up, lag.down, rule.isolated)
+    return lag.r, margin
+
+
 def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
            root: str | Path | None = None, held_out: bool = False) -> Days:  # fmt: skip
     """The rule from `first` to the panel's last day; `cache` keeps what rules share. A rule
@@ -204,19 +223,7 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
         cache[rule.top] = xs.universe(p, rule.top)
     if "x" not in cache:
         cache["x"] = xs.signals(p)
-    margin = None
-    if rule.hours == 0 and rule.isolated is None:
-        if "r0" not in cache:
-            cache["r0"] = xs.daily_returns(p)
-        r = cache["r0"]
-    else:
-        key = ("lag", rule.hours)
-        if key not in cache:
-            cache[key] = xs.lagged(p, root, [rule.hours], held_out)[rule.hours]
-        lag = cache[key]
-        r = lag.r
-        if rule.isolated is not None:
-            margin = xs.Margin(lag.up, lag.down, rule.isolated)
+    r, margin = _returns(p, rule, cache, root, held_out)
     inu, x = cache[rule.top], cache["x"][rule.signal]
     start = p.dates.index(first)
     pnl, _, names = xs.portfolio(x, inu, r, start, rule.hold, rule.q, cost_bp, rule.staggered,

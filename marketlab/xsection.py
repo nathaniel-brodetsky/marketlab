@@ -391,6 +391,29 @@ def forward(r: np.ndarray, hold: int) -> np.ndarray:
 Held = tuple[np.ndarray, np.ndarray, list[float], list[int]]
 
 
+def _tranches(start: int, hold: int, staggered: bool) -> list[int]:
+    """The days a rule's portfolios start on: `start`; or, staggered and held more than a
+    day, `hold` of them a day apart from it, one rebalanced each day."""
+    return [start + k for k in range(hold)] if staggered and hold > 1 else [start]
+
+
+def _pick(x: np.ndarray, inu: np.ndarray, q: float) -> np.ndarray:
+    """A rebalance's weights from a day's signal `x` over the coins in the universe `inu`:
+    long those strictly above its `1 - q` quantile, short those strictly below its `q`
+    quantile, half the capital a side in equal weights; nothing unless both sides have a
+    coin."""
+    new = np.zeros(len(x))
+    idx = np.flatnonzero(inu & np.isfinite(x))
+    if len(idx):
+        v = x[idx]
+        hi, lo = np.quantile(v, 1 - q), np.quantile(v, q)
+        longs, shorts = idx[v > hi], idx[v < lo]  # strictly: ties are not ranked
+        if len(longs) and len(shorts):
+            new[longs] = 0.5 / len(longs)
+            new[shorts] = -0.5 / len(shorts)
+    return new
+
+
 def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
              staggered: bool = False) -> Held:  # fmt: skip
     """The weights held over each day (decided at the close of the day before), the weight
@@ -401,11 +424,12 @@ def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
     result (a weekly rule started on a Monday or a Sunday holds the same coins once all
     seven are in). Each trades on its own: what two of them trade in one coin the same day is
     not netted, so the costs are an upper bound."""
-    if staggered and hold > 1:
-        parts = [holdings(x, inu, start + k, hold, q) for k in range(hold)]
-        held = sum(h for h, _, _, _ in parts) / hold
-        traded = sum(t for _, t, _, _ in parts) / hold
-        turns = [u / hold for _, _, us, _ in parts for u in us]
+    starts = _tranches(start, hold, staggered)
+    if len(starts) > 1:
+        parts = [holdings(x, inu, s, hold, q) for s in starts]
+        held = sum(h for h, _, _, _ in parts) / len(starts)
+        traded = sum(t for _, t, _, _ in parts) / len(starts)
+        turns = [u / len(starts) for _, _, us, _ in parts for u in us]
         names = [n for _, _, _, ns in parts for n in ns]
         return held, traded, turns, names
     n_days, n_sym = x.shape
@@ -416,16 +440,9 @@ def holdings(x: np.ndarray, inu: np.ndarray, start: int, hold: int, q: float,
     names: list[int] = []
     for i in range(start, n_days - 1):
         if (i - start) % hold == 0:
-            idx = np.flatnonzero(inu[i] & np.isfinite(x[i]))
-            new = np.zeros(n_sym)
-            if len(idx):
-                v = x[i, idx]
-                hi, lo = np.quantile(v, 1 - q), np.quantile(v, q)
-                longs, shorts = idx[v > hi], idx[v < lo]  # strictly: ties are not ranked
-                if len(longs) and len(shorts):
-                    new[longs] = 0.5 / len(longs)
-                    new[shorts] = -0.5 / len(shorts)
-                    names.append((len(longs) + len(shorts)) // 2)
+            new = _pick(x[i], inu[i], q)
+            if new.any():
+                names.append(int(np.count_nonzero(new)) // 2)
             turns.append(float(np.abs(new - w).sum()))
             traded[i] = turns[-1]
             w = new
@@ -487,13 +504,13 @@ def portfolio(x: np.ndarray, inu: np.ndarray, r: np.ndarray, start: int, hold: i
     on isolated margin of its size (`Margin`), each staggered portfolio on its own."""
     if margin is not None:
         rr = np.nan_to_num(r)
-        tranches = range(hold) if staggered and hold > 1 else range(1)
+        starts = _tranches(start, hold, staggered)  # each margined on its own
         _, _, turns, names = holdings(x, inu, start, hold, q, staggered)
         pnl, traded = np.zeros(len(r)), np.zeros(len(r))
-        for k in tranches:
-            held_k, _, _, _ = holdings(x, inu, start + k, hold, q)
-            pk, tk = _isolated(held_k, rr, start + k, hold, margin)
-            pnl, traded = pnl + pk / len(tranches), traded + tk / len(tranches)
+        for s in starts:
+            held_s, _, _, _ = holdings(x, inu, s, hold, q)
+            ps, ts = _isolated(held_s, rr, s, hold, margin)
+            pnl, traded = pnl + ps / len(starts), traded + ts / len(starts)
         return pnl - traded * cost_bp / 2 / 1e4, turns, names
     held, traded, turns, names = holdings(x, inu, start, hold, q, staggered)
     pnl = (held * np.nan_to_num(r)).sum(axis=1) - traded * cost_bp / 2 / 1e4

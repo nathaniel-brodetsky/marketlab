@@ -446,7 +446,7 @@ stages (point processes, the maker probe, the strategy and its gate, the archive
 trade-flow, screen and edge kinds) add their own, among them a gate that counts the second
 it is compared with and a taker filled with no latency; and the cross-section's, among them
 coins tied on a rate ranked by rounding, a day's span an hour late, a liquidated position
-bought back for free and one whose losses are forgotten the next day: 231 in all, each
+bought back for free and one whose losses are forgotten the next day: 233 in all, each
 caught.
 
 ## Numbers

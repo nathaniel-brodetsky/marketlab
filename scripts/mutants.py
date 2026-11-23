@@ -1196,19 +1196,19 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "        parts = [holdings(x, inu, start + k, hold, q) for k in range(hold)]",
-        "        parts = [holdings(x, inu, start, hold, q) for k in range(hold)]",
+        "    return [start + k for k in range(hold)] if staggered and hold > 1 else [start]",
+        "    return [start for k in range(hold)] if staggered and hold > 1 else [start]",
         "the staggered portfolios all started the same day",
     ),
     (
         "marketlab/xsection.py",
-        "        held = sum(h for h, _, _, _ in parts) / hold",
+        "        held = sum(h for h, _, _, _ in parts) / len(starts)",
         "        held = sum(h for h, _, _, _ in parts)",
         "each staggered portfolio with all the capital",
     ),
     (
         "marketlab/xsection.py",
-        "        traded = sum(t for _, t, _, _ in parts) / hold",
+        "        traded = sum(t for _, t, _, _ in parts) / len(starts)",
         "        traded = sum(t for _, t, _, _ in parts)",
         "the staggered portfolios' trades counted whole",
     ),
@@ -1358,20 +1358,20 @@ M = [
     ),
     (
         "marketlab/xsection.py",
-        "            held_k, _, _, _ = holdings(x, inu, start + k, hold, q)",
-        "            held_k, _, _, _ = holdings(x, inu, start, hold, q)",
+        "            held_s, _, _, _ = holdings(x, inu, s, hold, q)",
+        "            held_s, _, _, _ = holdings(x, inu, start, hold, q)",
         "the staggered portfolios on margin all started the same day",
     ),
     (
         "marketlab/xsection.py",
-        "        tranches = range(hold) if staggered and hold > 1 else range(1)",
-        "        tranches = range(1)",
+        "        starts = _tranches(start, hold, staggered)  # each margined on its own",
+        "        starts = _tranches(start, hold, False)  # each margined on its own",
         "a staggered rule on margin run as one portfolio",
     ),
     (
         "marketlab/xsection_kind.py",
-        "        if rule.isolated is not None:\n            margin = xs.Margin(lag.up, lag.down, rule.isolated)",
-        "        if False:\n            margin = xs.Margin(lag.up, lag.down, rule.isolated)",
+        "    if rule.isolated is not None:\n        margin = xs.Margin(lag.up, lag.down, rule.isolated)",
+        "    if False:\n        margin = xs.Margin(lag.up, lag.down, rule.isolated)",
         "a rule on isolated margin run on the whole capital",
     ),
     (
@@ -1397,6 +1397,18 @@ M = [
         '        iso = d.get("isolated", base.isolated if base else None)',
         '        iso = d.get("isolated")',
         "a variant without the primary's margin",
+    ),
+    (
+        "marketlab/xsection.py",
+        "                names.append(int(np.count_nonzero(new)) // 2)",
+        "                names.append(int(np.count_nonzero(new)))",
+        "the positions a side counted for both sides",
+    ),
+    (
+        "marketlab/xsection.py",
+        "        longs, shorts = idx[v > hi], idx[v < lo]  # strictly: ties are not ranked",
+        "        longs, shorts = idx[v >= hi], idx[v <= lo]",
+        "coins tied at the cut taken in",
     ),
 ]
 survived = []
