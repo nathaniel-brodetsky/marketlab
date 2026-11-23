@@ -48,8 +48,8 @@ on which days.
 | 013 | 011 with each position sold once it has lost its weight | passed development; tested forward to 2028-11-30 |
 | 014 | 011 with its capital split among the hour after each funding settlement | passed development; tested forward to 2028-11-30 |
 | 015 | 011's shorts against the rest of the universe | passed development; tested forward to 2028-11-30 |
-| 016 | a trend on BTC and ETH, each held to a volatility | written; held out 2024 .. 2026, opened once |
-| 017 | 016's rule tested forward | written; tested forward to 2028-11-30 |
+| 016 | a trend on BTC and ETH, each held to a volatility | failed on development: PBO 0.56 over two variants near the same; held out 2024 .. 2026, not confirmed (p 0.184) |
+| 017 | 016's rule tested forward | failed on development as 016; tested forward to 2028-11-30, informs only |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -820,8 +820,8 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 013 as 011, each position sold once it has lost its weight | passed on development (PBO 0.04, deflated Sharpe 0.80 against 12 trials, reported); held out forward over the same two years | traded an hour after the close, +27.7% a year 2020 .. 2023 (Sharpe from months 1.28, worst drawdown 20.9%; 2022 +0.2%), against +27.4% (1.26) for 011 the same way |
 | 014 as 011, its capital split among the hour after each funding settlement | passed on development (PBO 0.02, deflated Sharpe 0.90 against 13 trials, reported); held out forward over the same two years | +26.1% a year 2020 .. 2023 (Sharpe from months 1.24, worst drawdown 22.8%), against +27.4% (1.26) for 011, traded an hour after the close only |
 | 015 as 011, its long half the rest of the universe | passed on development (PBO 0.07, deflated Sharpe 0.79 against 14 trials, reported); held out forward over the same two years | +19.5% a year 2020 .. 2023 (Sharpe from months 1.20, worst drawdown 15.0%, beta -0.01; +10.9, +50.2, +5.9 and +10.8% by year), against +27.4% (1.26, worst drawdown 20.9%) for 011, traded an hour after the close only |
-| 016 trend on BTC and ETH, 20, 60 and 120 days together, each coin to 20% volatility, an hour after the close | written; held out January 2024 .. October 2026, opened once | in the rough look before it, +17.0% a year 2020 .. 2023 (Sharpe from months 1.10, worst drawdown 16.1%), correlated with 011 at -0.13 |
-| 017 as 016, tested forward | written; held out forward, 2026-12-01 .. 2028-11-30 | |
+| 016 trend on BTC and ETH, 20, 60 and 120 days together, each coin to 20% volatility, an hour after the close | failed on development: PBO 0.56 over its 2 variants, BTC and ETH or BTC alone, near the same (Sharpe from months 1.10 and 1.12), so that which did better was a coin's toss; p after BH 0.024, deflated Sharpe 0.95 against 12 trials, reported; its held-out period, opened once, informs, decides nothing: not confirmed | +17.0% a year 2020 .. 2023 (Sharpe from months 1.10, worst drawdown 16.2%; +40.1, +13.5, +4.7 and +9.7% by year); held out, January 2024 .. October 2026, +8.5% a year (Sharpe 0.52, worst drawdown 19.5%, beta 0.01, p 0.184), +7.0, +7.8 and +9.3% by year |
+| 017 as 016, tested forward | failed on development as 016 (the same rule and variants); held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow; informs, decides nothing | as 016 |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
@@ -911,6 +911,14 @@ of 7 coins): its numbers foretold the next 30 days' drawdown and volatility (ran
 correlation 0.28 to 0.47) no better than the volatility itself (0.47 and 0.52); each window
 scaled to its spread, its shape alone, nothing (-0.15 to +0.03); and halving 011 when one was
 high lowered 011's Sharpe every time. On daily returns, the topology measured their size.
+
+016 failed on development by its variants, not its rule: BTC and ETH or BTC alone did near
+the same, and of two variants near the same either is the better on a given half of the
+months by chance, so that PBO sits near 0.5 and a bar of 0.5 fails about half of them. A
+hypothesis's variants are to differ in what they do, as 011's weekly and daily rebalances
+do (its PBO 0.03). Held out, the trend made half its development Sharpe (0.52 from 1.10)
+and was up in each of its three years, as the carry made about half of its own over the
+same years: neither is told from noise over 34 months.
 
 Erratum: the comment in `experiments/007-flow-beats-cost.yaml` calls the days of
 Tardis.dev's recording futures days. They are Binance spot BTCUSDT. The hypothesis is left
