@@ -23,6 +23,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import positioning as pos
 from . import trend as tr
 from . import xsection as xs
 from . import xsection_kind as xk
@@ -79,7 +80,10 @@ def decide(root: str | Path, spec: xk.Spec, close: str, today: str | None = None
         return Decision(close, trade.isoformat(timespec="minutes"),
                         {p.symbols[j]: float(w[j]) for j in np.flatnonzero(w)},
                         int(inu[last].sum()))  # fmt: skip
-    x = xs.signals(p)[rule.signal]
+    if rule.signal in pos.SIGNALS:  # the archive's files, and the API's at a close not out yet
+        x = pos.signals(root, p, held_out=True, live=True)[rule.signal]
+    else:
+        x = xs.signals(p)[rule.signal]
     # one more row, so that the close of the last day decides the day after it
     x = np.vstack([x, np.full((1, x.shape[1]), np.nan)])
     inu = np.vstack([inu, np.zeros((1, inu.shape[1]), dtype=bool)])

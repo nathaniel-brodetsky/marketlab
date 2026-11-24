@@ -1,0 +1,81 @@
+# Written on 2026-11-24. Its held-out days are the two years from 2026-12-01, tested forward,
+# none of them existing yet. Everything up to 2026-10-31 has been seen.
+#
+# A rough look at the development years only (nothing after 2023-12-31 downloaded or read)
+# ranked the universe by what Binance publishes of each perpetual's positioning
+# (positioning.py: its daily metrics files), the crowd the other way: long where it was
+# least long, short where most [backtest, at the close, 9 bp, 2020-09 .. 2023-12, though the
+# files cover most coins only from December 2021; correlation with 011's daily net]:
+#
+#                                         held 7 days (staggered)        held 1 day
+#   all accounts' long/short ratio        +28.2%  Sharpe 1.31  p 0.003   +33.1%  1.18  0.004
+#                                         (drawdown 20.5%, correlation +0.21, rank IC +0.024)
+#   top traders' long/short ratio          +4.3%  0.72                   +2.2%   0.19
+#   open interest over 7 days              -5.1%  -0.37                  -14.9%  -0.80
+#   takers' buy/sell volume ratio          -9.2%  -0.87                  -14.2%  -0.93
+#
+# by year, the first: 2021 +3.6, 2022 +31.4, 2023 +59.2%. Its development days are therefore
+# 2022 .. 2023, the years the files cover. All eight are trials below, counted; the look's
+# other strategies (trend, new listings, funding between exchanges, topology, the quarterly
+# basis) are not of this family and are named in 016's file and the README.
+#
+# Its variants differ in what they do (016 failed on two near the same): rebalanced daily, a
+# tenth a side, a universe of 30.
+#
+# 018 and 019 are one rule over two periods, written together before either was opened;
+# the shadow records 019's decisions, from the archive's files and, at a close whose file
+# is not out yet, the ratio Binance's API gives (scripts/fetch_metrics.py --live).
+id: "019"
+name: xsection-crowd-forward
+kind: xsection
+hypothesis: >
+  Each UTC day, among the 50 USD-M perpetuals on coins with the most quote volume over the
+  last 30 days, long those whose share of all accounts long against short, at the day's last
+  5-minute reading Binance publishes, is lowest (strictly in the bottom 20%), short those
+  whose is highest (strictly in the top 20%), half the capital a side in equal weights, held
+  7 days as seven staggered portfolios, one rebalanced every day, decided at the daily close
+  and traded one hour later; paying 9 bp a round trip on every unit traded and the funding as
+  settled: its daily net is above zero over 2026-12-01 .. 2028-11-30.
+
+data:
+  days: {from: 2022-01-01, to: 2023-12-31}   # the years the files cover most coins
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: crowd           # minus all accounts' long/short ratio at the close
+  hold: 7                 # days each portfolio is held
+  staggered: true         # seven of them, one rebalanced each day
+  top: 50                 # the universe each day, by mean quote volume over 30 days
+  q: 0.2                  # a side
+  hours: 1                # traded this long after the daily close
+
+variants:                 # for PBO only; the verdict is the primary's
+  - {hold: 1}
+  - {q: 0.1}
+  - {top: 30}
+
+trials:                   # the rough look's eight, at the close
+  - {hours: 0}
+  - {hours: 0, hold: 1}
+  - {hours: 0, signal: crowd_top}
+  - {hours: 0, signal: crowd_top, hold: 1}
+  - {hours: 0, signal: oi7}
+  - {hours: 0, signal: oi7, hold: 1}
+  - {hours: 0, signal: takers}
+  - {hours: 0, signal: takers, hold: 1}
+
+# A round trip on Binance's USD-M perpetuals, a regular account, taker both ways: 0.05% less
+# 10% paid in BNB, 4.5 bp a leg (Binance's fee pages read 2026-11-20).
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 4 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 9 trials is reported, not a bar
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  max_abs_beta: 0.3       # to the universe, equal weights (held out)

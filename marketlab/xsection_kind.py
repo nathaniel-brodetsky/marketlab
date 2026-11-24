@@ -45,6 +45,7 @@ from scipy import stats
 
 from . import __version__
 from . import experiment as ex
+from . import positioning as pos
 from . import trend as tr
 from . import xsection as xs
 from .tradeflow import _dates
@@ -238,9 +239,9 @@ def load_spec(path: str | Path) -> Spec:
                  hrs[0] if hrs else int(get("hours", 0)), stag and int(get("hold")) > 1,
                  None if iso is None else float(iso),
                  None if cut is None else float(cut), hrs, side, *extra)  # fmt: skip
-        if r.signal not in (*xs.SIGNALS, "trend"):
+        if r.signal not in (*xs.SIGNALS, *pos.SIGNALS, "trend"):
             raise ex.ExperimentError(f"{path}: signal {r.signal!r} is none of "
-                                     f"{(*xs.SIGNALS, 'trend')}")  # fmt: skip
+                                     f"{(*xs.SIGNALS, *pos.SIGNALS, 'trend')}")  # fmt: skip
         if r.hold < 1 or r.top < 10 or not 0 < r.q < 0.5 or not 0 <= r.hours < 24:
             raise ex.ExperimentError(
                 f"{path}: {r.name}: hold at least 1 day, top at least 10, q between 0 and 0.5, "
@@ -329,6 +330,10 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
         return _follow_trend(p, rule, p.dates.index(first), cost_bp, cache, root, held_out)
     if "x" not in cache:
         cache["x"] = xs.signals(p)
+    if rule.signal in pos.SIGNALS and rule.signal not in cache["x"]:
+        if root is None:
+            raise ex.ExperimentError(f"{rule.name}: positioning is read from a data root")
+        cache["x"].update(pos.signals(root, p, held_out))  # the archive's, not the live ones
     stop = xs.Stop(rule.stop) if rule.stop is not None else None
     inu, x = cache[rule.top], cache["x"][rule.signal]
     start = p.dates.index(first)

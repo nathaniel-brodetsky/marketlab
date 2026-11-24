@@ -6,8 +6,8 @@ is read, and judged once on days it has never seen.**
 [![ci](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml/badge.svg)](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
-![hypotheses](https://img.shields.io/badge/hypotheses-17%20written%2C%20failures%20kept-0b0b0b)
-![injected faults](https://img.shields.io/badge/injected%20faults-284%20caught-0b0b0b)
+![hypotheses](https://img.shields.io/badge/hypotheses-19%20written%2C%20failures%20kept-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-294%20caught-0b0b0b)
 
 From order books recorded tick by tick by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
@@ -50,6 +50,8 @@ on which days.
 | 015 | 011's shorts against the rest of the universe | passed development; tested forward to 2028-11-30 |
 | 016 | a trend on BTC and ETH, each held to a volatility | failed on development: PBO 0.56 over two variants near the same; held out 2024 .. 2026, not confirmed (p 0.184) |
 | 017 | 016's rule tested forward | failed on development as 016; tested forward to 2028-11-30, informs only |
+| 018 | the crowd faded: long the coins all accounts are least long on, short the most | written; held out 2024 .. 2026, opened once |
+| 019 | 018's rule tested forward | written; tested forward to 2028-11-30 |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -751,6 +753,26 @@ such rule, BTC and ETH over 20, 60 and 120 days, each to 20%, an hour after the 
 written together before either was opened: 016 over 2024 .. 2026, the development years'
 next (the market over them known in outline), 017 forward. Their beta is reported, and
 only one beyond 1 fails them: a trend takes the market's side by design.
+Binance also publishes each perpetual's positioning, a file a coin a day
+(data/futures/um/daily/metrics): open interest, the top traders' and all accounts'
+long/short ratios and the takers' buy/sell volume ratio, every 5 minutes. `marketlab metrics
+days --from 2021-12-01 --to 2026-10-31` lists each coin's days in the universe and the 7
+before them (it reads the bars to list them, and computes nothing from them), and
+`python scripts/fetch_metrics.py --days-file runs/metrics-days.csv` downloads those files,
+each checked against its checksum, into `um/metrics/<SYMBOL>/`; with `--live --close DAY`
+it also takes, where the archive has no file yet for a close of the last three days, all
+accounts' ratio from Binance's public API at the last 5 minutes before it (`live.csv`), for
+the shadow only. `marketlab/positioning.py` reads a day's value as its last reading (the
+takers' ratio, its mean), known at the close, and nothing of a day after 2023-12-31 unless
+held out; its signals, the crowd faded, are `crowd` (minus all accounts' ratio),
+`crowd_top`, `takers` and `oi7` (minus the change in open interest over 7 days).
+`experiments/018-xsection-crowd.yaml` and `019-xsection-crowd-forward.yaml` are one rule
+on `crowd`, as 011 otherwise, over the development years the files cover most coins
+(2022 .. 2023), written together: 018 over 2024 .. 2026, 019 forward. Their four variants
+differ in what they do. `tests/test_positioning.py` reads a day's last reading, keeps the
+held-out days out and the archive before the API, downloads and checks the files against a
+local server, takes the API's last reading before a close and never after it, lists the days
+to fetch, and runs a planted crowd through a hypothesis and the shadow.
 `tests/test_trend.py` works a trend's direction and size out by hand, holds nothing without
 a bar at the close or the days a lookback or the volatility needs, checks the
 specification, opens the held-out period with the days its lookbacks need before it, and
@@ -792,7 +814,7 @@ first day sets, as its held-out run does. `--catch-up` also records every close 
 the last one recorded (31 at most), each from the data up to its own close, the time it
 was decided written next to it: a machine that was off catches up. `scripts/shadow_daily.sh
 SPEC ...`, from cron or the systemd user timer in `scripts/systemd/` (00:10 UTC, run at the
-next start if the machine was off; it records 011, 015 and 017, whose positions differ), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
+next start if the machine was off; it records 011, 015, 017 and 019, whose positions differ, fetching the last weeks' positioning first), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
 `--end` of today, whose bar Binance serves while it is still open and which would stay so)
 and records the decisions. `tests/test_shadow.py` checks a decision against what the
 held-out run holds the next day, also between rebalances, and that it is the same with
@@ -822,6 +844,8 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 015 as 011, its long half the rest of the universe | passed on development (PBO 0.07, deflated Sharpe 0.79 against 14 trials, reported); held out forward over the same two years | +19.5% a year 2020 .. 2023 (Sharpe from months 1.20, worst drawdown 15.0%, beta -0.01; +10.9, +50.2, +5.9 and +10.8% by year), against +27.4% (1.26, worst drawdown 20.9%) for 011, traded an hour after the close only |
 | 016 trend on BTC and ETH, 20, 60 and 120 days together, each coin to 20% volatility, an hour after the close | failed on development: PBO 0.56 over its 2 variants, BTC and ETH or BTC alone, near the same (Sharpe from months 1.10 and 1.12), so that which did better was a coin's toss; p after BH 0.024, deflated Sharpe 0.95 against 12 trials, reported; its held-out period, opened once, informs, decides nothing: not confirmed | +17.0% a year 2020 .. 2023 (Sharpe from months 1.10, worst drawdown 16.2%; +40.1, +13.5, +4.7 and +9.7% by year); held out, January 2024 .. October 2026, +8.5% a year (Sharpe 0.52, worst drawdown 19.5%, beta 0.01, p 0.184), +7.0, +7.8 and +9.3% by year |
 | 017 as 016, tested forward | failed on development as 016 (the same rule and variants); held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow; informs, decides nothing | as 016 |
+| 018 the crowd faded across coins: all accounts' long/short ratio, staggered, an hour after the close | written; held out January 2024 .. October 2026, opened once | in the rough look before it, at the close, +28.2% a year (Sharpe from months 1.31, worst drawdown 20.5%), correlated with 011 at +0.21 |
+| 019 as 018, tested forward | written; held out forward, 2026-12-01 .. 2028-11-30 | |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
@@ -911,6 +935,19 @@ of 7 coins): its numbers foretold the next 30 days' drawdown and volatility (ran
 correlation 0.28 to 0.47) no better than the volatility itself (0.47 and 0.52); each window
 scaled to its spread, its shape alone, nothing (-0.15 to +0.03); and halving 011 when one was
 high lowered 011's Sharpe every time. On daily returns, the topology measured their size.
+
+Binance's quarterly futures over the development years, from 2021 when the archive's begin
+[backtest]: their basis over spot averaged +17.9% a year in 2021 (ETH +19.4%), +2.4% in
+2022 and +6.4% in 2023; short the future and long spot, half the capital each, +1.3% a year
+(ETH +1.6%), nearly all of it 2021; over the perpetual instead of spot, -2 to -3%, its funding
+taking more than the basis gave. Not written: 008 is the same idea, better. Positioning,
+faded across the universe [backtest, at the close, the files covering most coins from
+December 2021]: all accounts' long/short ratio held 7 days +28.2% a year (Sharpe from months
+1.31, p 0.003, worst drawdown 20.5%, correlated with 011 at +0.21), held 1 day +33.1% (1.18),
+2021 +3.6, 2022 +31.4, 2023 +59.2%; the top traders' ratio +4.3% (0.72); open interest over
+7 days -5.1%; the takers' ratio -9.2%, though its rank IC was -0.069: the coins taken
+aggressively went on up in the body of the cross-section, not in its tails. Written as 018
+and 019.
 
 016 failed on development by its variants, not its rule: BTC and ETH or BTC alone did near
 the same, and of two variants near the same either is the better on a given half of the

@@ -1716,6 +1716,66 @@ M = [
         "        cols = [p.symbols.index(c) for c in rule.coins[:1]]",
         "the shadow records one coin of a trend",
     ),
+    (
+        "marketlab/positioning.py",
+        "            out[f] = float(np.mean(vals)) if f == MEAN else vals[-1]",
+        "            out[f] = float(np.mean(vals)) if f == MEAN else vals[0]",
+        "a day's positioning its first reading, not its last",
+    ),
+    (
+        "marketlab/positioning.py",
+        "    if p.dates and p.dates[-1] > xs.DEV_END and not held_out:",
+        "    if False:",
+        "the positioning of held-out days read on the development days",
+    ),
+    (
+        "marketlab/positioning.py",
+        "            elif day in lv:",
+        "            if day in lv:",
+        "the API's ratio read over the archive's",
+    ),
+    (
+        "marketlab/positioning.py",
+        '        "crowd": -v["count_long_short_ratio"],',
+        '        "crowd": v["count_long_short_ratio"],',
+        "the crowd followed, not faded",
+    ),
+    (
+        "marketlab/positioning.py",
+        "        change = np.log(oi / xs._lag(oi, 7))",
+        "        change = np.log(oi / xs._lag(oi, 6))",
+        "open interest over 6 days, not 7",
+    ),
+    (
+        "marketlab/positioning.py",
+        "    for k in range(before + 1):",
+        "    for k in range(before):",
+        "the days to fetch without a coin's first day in the universe",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        cache["x"].update(pos.signals(root, p, held_out))  # the archive\'s, not the live ones',
+        '        cache["x"].update(pos.signals(root, p, held_out, True))  # the archive\'s, not the live ones',
+        "a hypothesis's run reads the API's ratios",
+    ),
+    (
+        "marketlab/shadow.py",
+        "        x = pos.signals(root, p, held_out=True, live=True)[rule.signal]",
+        "        x = pos.signals(root, p, held_out=True)[rule.signal]",
+        "the shadow without the API's ratio at a close not out",
+    ),
+    (
+        "scripts/fetch_metrics.py",
+        '    rows = [r for r in rows if int(r["timestamp"]) < end]',
+        '    rows = [r for r in rows if int(r["timestamp"]) <= end]',
+        "the API's ratio taken after the close",
+    ),
+    (
+        "scripts/fetch_metrics.py",
+        "    rows.setdefault(day, [day, repr(ratio), now])  # a close taken once stays as it was",
+        "    rows[day] = [day, repr(ratio), now]  # a close taken once stays as it was",
+        "a close's live ratio taken again over the first",
+    ),
 ]
 survived = []
 for f, old, new, label in M:

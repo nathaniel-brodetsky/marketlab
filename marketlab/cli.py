@@ -359,6 +359,24 @@ def print_xsection_report(r) -> None:
     print(f"verdict     {r.verdict}" + (f": {'; '.join(r.reasons)}" if r.reasons else ""))
 
 
+def cmd_metrics_days(a: argparse.Namespace) -> int:
+    from . import positioning as pos
+    from . import xsection as xs
+
+    # the bars are read only to list the days to download (each coin's days in the universe
+    # and the days before them); nothing is computed from them
+    p = xs.load(a.data, a.first, a.to, held_out=True)
+    if not p.symbols:
+        raise ContractError(f"no daily bars under {a.data}/um/klines1d: scripts/fetch_universe.py")
+    pairs = pos.wanted(p, a.first, a.top, a.before)
+    pos.write_days(pairs, a.out)
+    coins = len({s for s, _ in pairs})
+    print(f"{len(pairs)} coin-days of {coins} perpetuals, {a.first} .. {a.to}, the universe of "
+          f"{a.top} and the {a.before} days before -> {a.out} (scripts/fetch_metrics.py "
+          f"--days-file {a.out})")  # fmt: skip
+    return 0
+
+
 def cmd_shadow(a: argparse.Namespace) -> int:
     import datetime as dt
 
@@ -1318,6 +1336,17 @@ def parser() -> argparse.ArgumentParser:
     g.add_argument("--workers", type=int, default=1, help="days at a time (default 1)")
     g.add_argument("--out", help="per-day table to this .csv or .parquet file")
     g.set_defaults(run=cmd_strategy)
+
+    mt = sub.add_parser("metrics", help="Binance's positioning files: the days to download")
+    ms = mt.add_subparsers(dest="action", required=True)
+    md = ms.add_parser("days", help="each coin's days in the universe, for fetch_metrics.py")
+    md.add_argument("--data", default="binance-data", help="default ./binance-data")
+    md.add_argument("--from", dest="first", required=True, help="YYYY-MM-DD")
+    md.add_argument("--to", required=True, help="YYYY-MM-DD, included")
+    md.add_argument("--top", type=int, default=50, help="the universe's size (default 50)")
+    md.add_argument("--before", type=int, default=7, help="days before each (default 7)")
+    md.add_argument("--out", default="runs/metrics-days.csv")
+    md.set_defaults(run=cmd_metrics_days)
 
     sh = sub.add_parser(
         "shadow",

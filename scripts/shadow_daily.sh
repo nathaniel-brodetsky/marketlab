@@ -20,6 +20,16 @@ if ! python scripts/fetch_universe.py --start 2020-01-01 --end "$yesterday" \
     echo "$(date -u +%FT%TZ) fetch: some perpetuals failed, see runs/shadow-fetch.log" \
         | tee -a runs/shadow.log
 fi
+# the positioning of the last weeks' universe: the archive's files, and the API's ratio at a
+# close whose file is not out yet (for a hypothesis on those signals; quick otherwise)
+since=$(date -u -d '45 days ago' +%F)
+if ! { python -m marketlab.cli metrics days --data binance-data --from "$since" --to "$yesterday" \
+        --out runs/metrics-days-recent.csv \
+      && python scripts/fetch_metrics.py --days-file runs/metrics-days-recent.csv \
+        --out binance-data --live --close "$yesterday"; } >> runs/shadow-fetch.log 2>&1; then
+    echo "$(date -u +%FT%TZ) metrics: some failed, see runs/shadow-fetch.log" \
+        | tee -a runs/shadow.log
+fi
 # the shadow refuses by itself a close whose bars are not there
 python -m marketlab.cli shadow "$@" --data binance-data --close "$yesterday" --catch-up 2>&1 \
     | sed "s/^/$(date -u +%FT%TZ) /" | tee -a runs/shadow.log
