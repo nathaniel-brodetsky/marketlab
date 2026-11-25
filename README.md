@@ -52,7 +52,7 @@ on which days.
 | 017 | 016's rule tested forward | failed on development as 016; tested forward to 2028-11-30, informs only |
 | 018 | the crowd faded: long the coins all accounts are least long on, short the most | passed development; held out 2024 .. 2026: confirmed, Sharpe 1.54, p 0.009 |
 | 019 | 018's rule tested forward | passed development; tested forward to 2028-11-30 |
-| 020 | 019's rule and 017's trend as one book, 39% and 61% | written; tested forward to 2028-11-30 |
+| 020 | 019's rule and 017's trend as one book, 39% and 61% | failed on development: PBO 0.64 over two variants that differ; tested forward to 2028-11-30, informs only |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -858,7 +858,7 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 017 as 016, tested forward | failed on development as 016 (the same rule and variants); held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow; informs, decides nothing | as 016 |
 | 018 the crowd faded across coins: all accounts' long/short ratio, staggered, an hour after the close | passed on development (PBO 0.15 over its 4 variants, p after BH 0.011, deflated Sharpe 0.40 against 9 trials, reported); held out, opened once: confirmed | +44.4% a year 2022 .. 2023 (Sharpe from months 1.65, worst drawdown 19.8%; +28.3 and +60.5% by year); held out, January 2024 .. October 2026, +44.4% a year (Sharpe 1.54, worst drawdown 20.2%, beta 0.03, p 0.009), +7.0, +48.9 and +69.8% by year |
 | 019 as 018, tested forward | passed on development as 018; held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow | as 018 |
-| 020 019's rule and 017's as one book, 39% and 61%, each part to the same volatility over 2022 .. 2023 | written; held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow | in the rough look before it, +22.0% a year 2022 .. 2023 (Sharpe from months 1.96, worst drawdown 7.7%) and +22.6% over 2024 .. 2026, seen (1.72, worst drawdown 12.6%), against 1.65 and 1.54 for the crowd alone |
+| 020 019's rule and 017's as one book, 39% and 61%, each part to the same volatility over 2022 .. 2023 | failed on development: PBO 0.64 over its 2 variants, the book or the crowd, the carry and the trend in equal shares (Sharpe from months 1.96 and 1.55); p after BH 0.0084, deflated Sharpe 0.99 against 4 trials, reported; held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow; informs, decides nothing | +21.9% a year 2022 .. 2023 (Sharpe from months 1.96, worst drawdown 7.7%, beta -0.01, up in 75% of months; +14.2 and +29.5% by year), its weights from those days; over 2024 .. 2026, seen, +22.6% (1.72, worst drawdown 12.6%), against 1.65 and 1.54 for the crowd alone |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
@@ -990,6 +990,14 @@ hypothesis's variants are to differ in what they do, as 011's weekly and daily r
 do (its PBO 0.03). Held out, the trend made half its development Sharpe (0.52 from 1.10)
 and was up in each of its three years, as the carry made about half of its own over the
 same years: neither is told from noise over 34 months.
+
+020 failed the same way though its two variants differed in what they did: over 2022 ..
+2023 the book of the crowd and the trend had a Sharpe ratio from months of 1.96 and the book
+of the crowd, the carry and the trend 1.55, and still, split into halves of its months, the
+better over one half was the worse over the other more often than not (PBO 0.64): 24 months
+do not tell two books holding the same crowd apart. That variants differ in what they do is
+needed, not enough. Its parts are tested forward on their own (017, 019); its forward record
+informs, decides nothing.
 
 018, the crowd faded, held out over 2024 .. 2026: +44.4% a year at a Sharpe from months of
 1.54 (1.65 on its development years), up in each year (+7.0, +48.9 and +69.8%), worst
