@@ -1190,8 +1190,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "        lag = xs.lagged(p, root, [h], held_out=True)[h]",
-        "        lag = xs.lagged(p, root, [h])[h]",
+        '                cache[("lag", h)] = xs.lagged(p, root, [h], held_out=True)[h]',
+        '                cache[("lag", h)] = xs.lagged(p, root, [h])[h]',
         "the held-out run refused its own hour bars",
     ),
     (
@@ -1382,8 +1382,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h or margined]:",
-        "    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h]:",
+        "        for h in [h for h in rule.split or (rule.hours,) if h or margined]:",
+        "        for h in [h for h in rule.split or (rule.hours,) if h]:",
         "the held-out run on margin without its hour bars checked",
     ),
     (
@@ -1508,8 +1508,8 @@ M = [
     ),
     (
         "marketlab/xsection_kind.py",
-        "    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h or margined]:",
-        "    for h in [h for h in (spec.primary.hours,) if h or margined]:",
+        "        for h in [h for h in rule.split or (rule.hours,) if h or margined]:",
+        "        for h in [h for h in (rule.hours,) if h or margined]:",
         "the held-out run checks a split rule's first hour only",
     ),
     (
@@ -1775,6 +1775,60 @@ M = [
         "    rows.setdefault(day, [day, repr(ratio), now])  # a close taken once stays as it was",
         "    rows[day] = [day, repr(ratio), now]  # a close taken once stays as it was",
         "a close's live ratio taken again over the first",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '        return Rule("book", 1, 50, 0.2, parts=tuple((r, w / total) for r, w in parts))',
+        '        return Rule("book", 1, 50, 0.2, parts=tuple((r, w) for r, w in parts))',
+        "a book's weights not divided by their sum",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        return Days(parts[0][0].dates, sum(w * d.net for d, w in parts),",
+        "        return Days(parts[0][0].dates, sum(d.net for d, w in parts),",
+        "a book's net its parts' summed, not weighted",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    rules = [r for rule in rules for r in leaves(rule)]",
+        "    rules = list(rules)",
+        "a book's held-out run without the days its trend part's lookbacks need",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "    for rule in leaves(spec.primary):",
+        "    for rule in leaves(spec.primary)[:1]:",
+        "the held-out run checks the hour bars of a book's first part only",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        if len({r.hours for r, _ in parts}) != 1 or any(r.split for r, _ in parts):",
+        "        if any(r.split for r, _ in parts):",
+        "a book's parts at different hours taken",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "            if isinstance(w, bool) or not isinstance(w, int | float) or not w > 0:",
+        "            if not isinstance(w, int | float) or not w > 0:",
+        "true taken for a part's weight of 1",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        "        if len({r for r, _ in parts}) != len(parts):",
+        "        if False:",
+        "a book with the same rule twice taken",
+    ),
+    (
+        "marketlab/xsection_kind.py",
+        '            if r.signal == "book":\n                raise ex.ExperimentError(f"{path}: a book\'s part is not a book")',
+        '            if False:\n                raise ex.ExperimentError(f"{path}: a book\'s part is not a book")',
+        "a book in a book taken",
+    ),
+    (
+        "marketlab/shadow.py",
+        "        parts = [(decide(root, replace(spec, primary=r), close, today), w) for r, w in rule.parts]",
+        "        parts = [(decide(root, replace(spec, primary=r), close, today), w) for r, w in rule.parts[:1]]",
+        "the shadow records a book's first part only",
     ),
 ]
 survived = []

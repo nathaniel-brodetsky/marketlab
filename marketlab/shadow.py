@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import csv
 import datetime as dt
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -52,6 +52,15 @@ def decide(root: str | Path, spec: xk.Spec, close: str, today: str | None = None
     if close >= today:
         raise NotReady(f"the close of {close} is not over yet (today is {today}, UTC)")
     rule = spec.primary
+    if rule.signal == "book":  # each part's weights at its share of the capital, netted
+        parts = [(decide(root, replace(spec, primary=r), close, today), w) for r, w in rule.parts]
+        weights: dict[str, float] = {}
+        for d, w in parts:
+            for sym, x in d.weights.items():
+                weights[sym] = weights.get(sym, 0.0) + w * x
+        first = parts[0][0]
+        return Decision(close, first.trade_at, {s: x for s, x in weights.items() if x},
+                        first.universe)  # fmt: skip
     back = max(4 * rule.hold + 10, xk.history([rule]))
     first = (dt.date.fromisoformat(close) - dt.timedelta(days=back)).isoformat()
     p = xs.load(root, first, close, held_out=True)  # decisions only: no return is computed

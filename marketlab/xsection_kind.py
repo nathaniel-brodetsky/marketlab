@@ -19,6 +19,12 @@ or short by the mean of its signs over `lookbacks` days (`marketlab.trend`), siz
 or each `coin` to a volatility `target`, rebalanced every day; the universe only gives the
 market its beta is reported against.
 
+`signal: book` is a book of such rules, its `parts`: each a rule and its `weight`, its
+share of the capital the weights' sum divides (they need not add to 1). Each part runs on
+its own share as it would alone, its costs its own (what two parts trade in one coin the
+same day is not netted: an upper bound), and the book's day is the parts' days weighted.
+The parts trade at the same hour after the close, none split among hours, none a book.
+
 The development run scores the primary and its variants on the development days: the
 daily net, in bp of the capital, tested for a mean above zero with Newey-West errors and
 adjusted with Benjamini-Hochberg over every hypothesis written; PBO over the variants by
@@ -78,9 +84,13 @@ class Rule:
     size: str = "whole"
     target: float = 0.2
     window: int = 30
+    # signal "book": its rules, each with its share of the capital (the shares add to 1)
+    parts: tuple[tuple[Rule, float], ...] = ()
 
     @property
     def name(self) -> str:
+        if self.signal == "book":
+            return "a book: " + "; ".join(f"{w:.0%} in {r.name}" for r, w in self.parts)
         late = f", traded {self.hours} h after the close" if self.hours else ""
         if self.signal == "trend":
             on = ", ".join(c.removesuffix("USDT") for c in self.coins)
@@ -156,7 +166,41 @@ def load_spec(path: str | Path) -> Spec:
             f"begin after it: nothing else reads past it"
         )
 
+    def book(d: dict, base: Rule | None) -> Rule:
+        other = sorted(set(d) - {"signal", "parts"})
+        if other:
+            raise ex.ExperimentError(f"{path}: a book is its parts and nothing else, not "
+                                     f"{', '.join(other)}")  # fmt: skip
+        if "parts" not in d and base is not None and base.signal == "book":
+            return base
+        given = d.get("parts")
+        if (not isinstance(given, list) or len(given) < 2
+                or not all(isinstance(x, dict) for x in given)):  # fmt: skip
+            raise ex.ExperimentError(f"{path}: a book's parts are a list of two or more rules, "
+                                     f"each with its weight")  # fmt: skip
+        parts = []
+        for x in given:
+            w = x.get("weight")
+            if isinstance(w, bool) or not isinstance(w, int | float) or not w > 0:
+                raise ex.ExperimentError(f"{path}: a part's weight is above 0, not {w!r}")
+            r = rule({k: v for k, v in x.items() if k != "weight"}, None)
+            if r.signal == "book":
+                raise ex.ExperimentError(f"{path}: a book's part is not a book")
+            parts.append((r, float(w)))
+        if len({r for r, _ in parts}) != len(parts):
+            raise ex.ExperimentError(f"{path}: a book's parts are different rules")
+        if len({r.hours for r, _ in parts}) != 1 or any(r.split for r, _ in parts):
+            raise ex.ExperimentError(f"{path}: a book's parts trade at the same hour after the "
+                                     f"close, none split among hours")  # fmt: skip
+        total = sum(w for _, w in parts)
+        return Rule("book", 1, 50, 0.2, parts=tuple((r, w / total) for r, w in parts))
+
     def rule(d: dict, base: Rule | None) -> Rule:
+        if d.get("signal", base.signal if base else None) == "book":
+            return book(d, base)
+        if "parts" in d:
+            raise ex.ExperimentError(f"{path}: parts: for signal book only")
+
         def get(key: str, default=None):
             if key in d:
                 return d[key]
@@ -323,7 +367,14 @@ def follow(p: xs.Panel, rule: Rule, first: str, cost_bp: float, cache: dict,
            root: str | Path | None = None, held_out: bool = False) -> Days:  # fmt: skip
     """The rule from `first` to the panel's last day; `cache` keeps what rules share. A rule
     traded hours after the close, or on isolated margin, reads the hour bars under `root`; a
-    rule split among hours is the mean of itself traded at each of them."""
+    rule split among hours is the mean of itself traded at each of them; a book, its parts'
+    days weighted by their shares of the capital."""
+    if rule.signal == "book":
+        parts = [(follow(p, r, first, cost_bp, cache, root, held_out), w) for r, w in rule.parts]
+        priced = float(np.min([d.priced for d, _ in parts]))  # the least priced part's
+        return Days(parts[0][0].dates, sum(w * d.net for d, w in parts),
+                    sum(w * d.gross for d, w in parts), sum(w * d.market for d, w in parts),
+                    sum(d.names for d, _ in parts), priced)  # fmt: skip
     if rule.top not in cache:
         cache[rule.top] = xs.universe(p, rule.top)
     if rule.signal == "trend":
@@ -375,9 +426,16 @@ def _follow_trend(p: xs.Panel, rule: Rule, start: int, cost_bp: float, cache: di
                 float(on.sum(axis=1).mean()) if on.size else float("nan"), priced)  # fmt: skip
 
 
+def leaves(rule: Rule) -> list[Rule]:
+    """A book's parts, or the rule itself."""
+    return [r for r, _ in rule.parts] if rule.signal == "book" else [rule]
+
+
 def history(rules) -> int:
-    """The days before a period's first a trend among `rules` needs bars for: its longest
-    lookback and its volatility's window, with some to spare; 0 without a trend."""
+    """The days before a period's first a trend among `rules` (or in a book of them) needs
+    bars for: its longest lookback and its volatility's window, with some to spare; 0
+    without a trend."""
+    rules = [r for rule in rules for r in leaves(rule)]
     return max((max(r.lookbacks) + r.window + 10 for r in rules if r.signal == "trend"),
                default=0)  # fmt: skip
 
@@ -549,27 +607,30 @@ def final(spec: Spec, root: str | Path, results: Path, prov: ex.Provenance | Non
     if not p.symbols or not np.isfinite(p.close[p.dates.index(spec.holdout_first) :]).any():
         raise ex.ExperimentError("no daily bars in the held-out period")
     cache: dict = {}
-    # the hour bars there first, at every hour it trades at, or nothing is computed
-    margined = spec.primary.isolated is not None
-    for h in [h for h in spec.primary.split or (spec.primary.hours,) if h or margined]:
-        start = p.dates.index(spec.holdout_first)
-        inu = cache[spec.primary.top] = xs.universe(p, spec.primary.top)
-        lag = xs.lagged(p, root, [h], held_out=True)[h]
-        cache[("lag", h)] = lag
-        need = inu[start:-1]
-        if spec.primary.signal == "trend":  # its coins, every day
-            need = np.isin(np.array(p.symbols), spec.primary.coins)[None, :].repeat(len(need), 0)
-        got = lag.priced[start:-1] & lag.priced[start + 1 :]
-        share = float(got[need].mean()) if need.any() else 0.0
-        if share < MIN_PRICED:
-            short = (need & ~got).sum(axis=0)
-            names = [p.symbols[j] for j in np.argsort(-short, kind="stable") if short[j]]
-            raise ex.ExperimentError(
-                f"hour bars at both ends for {share:.1%} of the held-out universe's coin-days "
-                f"traded {h} h after the close (at least {MIN_PRICED:.0%} asked): fetch them "
-                f"with scripts/fetch_hourly.py for {', '.join(names)}; nothing was computed or "
-                f"recorded"
-            )
+    # the hour bars there first, at every hour each of its rules (a book's parts) trades at,
+    # or nothing is computed
+    for rule in leaves(spec.primary):
+        margined = rule.isolated is not None
+        for h in [h for h in rule.split or (rule.hours,) if h or margined]:
+            start = p.dates.index(spec.holdout_first)
+            inu = cache[rule.top] = xs.universe(p, rule.top)
+            if ("lag", h) not in cache:
+                cache[("lag", h)] = xs.lagged(p, root, [h], held_out=True)[h]
+            lag = cache[("lag", h)]
+            need = inu[start:-1]
+            if rule.signal == "trend":  # its coins, every day
+                need = np.isin(np.array(p.symbols), rule.coins)[None, :].repeat(len(need), 0)
+            got = lag.priced[start:-1] & lag.priced[start + 1 :]
+            share = float(got[need].mean()) if need.any() else 0.0
+            if share < MIN_PRICED:
+                short = (need & ~got).sum(axis=0)
+                names = [p.symbols[j] for j in np.argsort(-short, kind="stable") if short[j]]
+                raise ex.ExperimentError(
+                    f"hour bars at both ends for {share:.1%} of the held-out universe's "
+                    f"coin-days traded {h} h after the close (at least {MIN_PRICED:.0%} asked): "
+                    f"fetch them with scripts/fetch_hourly.py for {', '.join(names)}; nothing "
+                    f"was computed or recorded"
+                )
     d = follow(p, spec.primary, spec.holdout_first, spec.round_trip_bp, cache, root, True)
     s = score(d, spec.nw_lags)
     up = sum(v > 0 for v in s["by_year_pct"].values())

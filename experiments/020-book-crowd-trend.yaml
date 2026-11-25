@@ -1,0 +1,105 @@
+# Written on 2026-11-25, before any of its held-out days exist: they are the two years from
+# 2026-12-01, tested forward as 011's to 019's. Everything up to 2026-10-31 has been seen.
+#
+# A rough look put the strategies written so far in one book [backtest, an hour after the
+# close, 9 bp a round trip; a year, Sharpe from months, worst drawdown]: 018 the crowd, 011
+# the carry, 015 its shorts against the rest, 016 the trend on BTC and ETH, 010 momentum
+# (failed; for the correlations only), each its file's primary, over 018's development years
+# and over 2024 .. 2026, every one of them seen there (010's, 016's and 018's held-out years;
+# 011's and 015's rules or their parts looked at):
+#
+#                                        2022 .. 2023              2024 .. 2026, seen
+#   018 the crowd                        +44.4%  1.65  19.8%       +44.4%  1.54  20.2%
+#   011 the carry                         +8.4%  0.48  20.9%       +25.1%  0.65  46.9%
+#   015 the carry's shorts                +8.4%  0.91   9.3%       +11.5%  0.31  56.7%
+#   016 the trend                         +7.4%  0.53  16.2%        +8.5%  0.52  19.5%
+#   010 momentum                         +14.8%  0.49  35.1%       +33.3%  0.66  55.6%
+#
+# Correlations of the daily nets, 2022 .. 2023 (2024 .. 2026): the crowd and the trend -0.00
+# (+0.04), the crowd and the carry +0.32 (+0.03), the carry and the trend -0.13 (-0.01), the
+# crowd and momentum +0.40 (+0.32). Then four books, their weights from 2022 .. 2023 only and
+# from nothing but the parts' daily volatility, kept for 2024 .. 2026:
+#
+#   the crowd, the carry, the trend:
+#     equal shares                       +20.1%  1.55   7.2%       +26.0%  1.64  18.3%
+#     each to the same volatility        +17.7%  1.49   7.0%       +23.4%  1.55  16.9%
+#     each the same share of the risk    +16.6%  1.45   7.4%       +22.2%  1.49  16.1%
+#   the crowd and the trend, each to the same volatility (0.39 and 0.61):
+#                                        +22.0%  1.96   7.7%       +22.6%  1.72  12.6%
+#
+# The last is the primary below: of the four, the only one above the crowd alone over both
+# periods, in Sharpe and in drawdown; in a year's return over the worst drawdown it was above
+# it over 2022 .. 2023 (2.86 against 2.24) and below over 2024 .. 2026 (1.79 against 2.19).
+# The difference is within the noise of two or three years (a monthly Sharpe ratio's
+# standard error over three years is near 0.9); the case for the book is that its two parts
+# move apart, not what it made. Its trend part is 017's rule, which failed its development
+# (PBO over two variants near the same) and is a part here for moving apart from the crowd,
+# not as a confirmed edge; its crowd part is 019's. Its development run is not out of
+# sample: its weights come from those days.
+#
+# 020 is read with 017 and 019, its parts, tested forward over the same two years; it records
+# nothing of its own that they do not (the shadow, given it, records the two netted).
+id: "020"
+name: book-crowd-trend
+kind: xsection
+hypothesis: >
+  Each UTC day, 39% of the capital in 019's rule (among the 50 USD-M perpetuals on coins
+  with the most quote volume over 30 days, long those whose all accounts' long/short ratio at
+  the close is strictly in the bottom 20%, short those strictly in the top 20%, half a side,
+  held 7 days as seven staggered portfolios) and 61% in 017's (BTC and ETH, half each, each
+  long or short by the mean of the signs of its last 20, 60 and 120 days and held to 20% a
+  year of volatility over 30 days, at most its half), each part on its own share, decided at
+  the daily close and traded one hour later, paying 9 bp a round trip on every unit traded
+  and the funding as settled: its daily net is above zero over 2026-12-01 .. 2028-11-30.
+
+data:
+  days: {from: 2022-01-01, to: 2023-12-31}   # the crowd's development years
+  holdout: {from: 2026-12-01, to: 2028-11-30}   # forward: none of it exists yet
+
+rule:                     # the primary
+  signal: book
+  parts:                  # each a rule and its share of the capital
+    - {weight: 0.39, signal: crowd, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+    - {weight: 0.61, signal: trend, coins: [BTCUSDT, ETHUSDT], lookbacks: [20, 60, 120],
+       size: coin, target: 0.2, window: 30, hold: 1, hours: 1}
+
+variants:                 # for PBO only; the verdict is the primary's
+  - parts:                # the three in equal shares: a book of another make
+      - {weight: 1, signal: crowd, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 1, signal: carry, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 1, signal: trend, coins: [BTCUSDT, ETHUSDT], lookbacks: [20, 60, 120],
+         size: coin, target: 0.2, window: 30, hold: 1, hours: 1}
+
+trials:                   # the four books the rough look printed, the primary in
+  - parts:
+      - {weight: 1, signal: crowd, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 1, signal: carry, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 1, signal: trend, coins: [BTCUSDT, ETHUSDT], lookbacks: [20, 60, 120],
+         size: coin, target: 0.2, window: 30, hold: 1, hours: 1}
+  - parts:
+      - {weight: 0.27, signal: crowd, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 0.31, signal: carry, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 0.42, signal: trend, coins: [BTCUSDT, ETHUSDT], lookbacks: [20, 60, 120],
+         size: coin, target: 0.2, window: 30, hold: 1, hours: 1}
+  - parts:
+      - {weight: 0.24, signal: crowd, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 0.30, signal: carry, hold: 7, staggered: true, top: 50, q: 0.2, hours: 1}
+      - {weight: 0.46, signal: trend, coins: [BTCUSDT, ETHUSDT], lookbacks: [20, 60, 120],
+         size: coin, target: 0.2, window: 30, hold: 1, hours: 1}
+
+# As 011's to 019's: a regular account, taker both ways, 4.5 bp a leg. The two parts trading
+# one coin the same day are not netted: an upper bound.
+costs: {round_trip_bp: 9.0}
+
+protocol:
+  nw_lags: 10             # days
+
+success:
+  alpha: 0.05             # one-sided; on the development days after Benjamini-Hochberg over
+                          # every hypothesis written, on the held-out ones raw: one test
+  max_pbo: 0.5            # over the 2 variants, by month (development)
+  min_positive_months: 0.5  # (development)
+  # the deflated Sharpe ratio against the 4 trials is reported, not a bar
+  min_positive_years: 2   # of 2026 (December), 2027, 2028 (to November) (held out)
+  max_abs_beta: 1.0       # to the universe, equal weights (held out): its trend part takes
+                          # the market's side by design, as 016's and 017's bar has it

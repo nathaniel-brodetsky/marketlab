@@ -6,8 +6,8 @@ is read, and judged once on days it has never seen.**
 [![ci](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml/badge.svg)](https://github.com/nathaniel-brodetsky/marketlab/actions/workflows/ci.yml)
 ![Python 3.12](https://img.shields.io/badge/python-3.12-3776ab)
 ![MIT](https://img.shields.io/badge/license-MIT-0b0b0b)
-![hypotheses](https://img.shields.io/badge/hypotheses-19%20written%2C%20failures%20kept-0b0b0b)
-![injected faults](https://img.shields.io/badge/injected%20faults-294%20caught-0b0b0b)
+![hypotheses](https://img.shields.io/badge/hypotheses-20%20written%2C%20failures%20kept-0b0b0b)
+![injected faults](https://img.shields.io/badge/injected%20faults-303%20caught-0b0b0b)
 
 From order books recorded tick by tick by
 [marketrec](https://github.com/nathaniel-brodetsky/marketrec) to the funding of 678
@@ -52,6 +52,7 @@ on which days.
 | 017 | 016's rule tested forward | failed on development as 016; tested forward to 2028-11-30, informs only |
 | 018 | the crowd faded: long the coins all accounts are least long on, short the most | passed development; held out 2024 .. 2026: confirmed, Sharpe 1.54, p 0.009 |
 | 019 | 018's rule tested forward | passed development; tested forward to 2028-11-30 |
+| 020 | 019's rule and 017's trend as one book, 39% and 61% | written; tested forward to 2028-11-30 |
 
 The numbers behind each verdict, and what they mean: [What has been found](#what-has-been-found).
 
@@ -773,6 +774,17 @@ differ in what they do. `tests/test_positioning.py` reads a day's last reading, 
 held-out days out and the archive before the API, downloads and checks the files against a
 local server, takes the API's last reading before a close and never after it, lists the days
 to fetch, and runs a planted crowd through a hypothesis and the shadow.
+A rule may also be a book (`signal: book`): its `parts`, each a rule and its `weight`, its
+share of the capital the weights' sum divides. Each part runs on its own share as it would
+alone, its costs its own (two parts trading one coin the same day are not netted: an upper
+bound), and the book's day is the parts' days weighted; the parts trade at the same hour,
+none split, none a book. Its held-out run reads the days its parts' lookbacks need and
+checks every part's hour bars; the shadow records the parts' weights netted.
+`experiments/020-book-crowd-trend.yaml` is one: 019's rule and 017's, 39% and 61%, each to
+the same volatility over 2022 .. 2023 and nothing else, tested forward over 011's to 019's
+two years. `tests/test_book.py` weighs a book's days, refuses bad books, opens its held-out
+period with the days its trend part needs and checks each part's hour bars, and has the
+shadow record it.
 `tests/test_trend.py` works a trend's direction and size out by hand, holds nothing without
 a bar at the close or the days a lookback or the volatility needs, checks the
 specification, opens the held-out period with the days its lookbacks need before it, and
@@ -814,7 +826,7 @@ first day sets, as its held-out run does. `--catch-up` also records every close 
 the last one recorded (31 at most), each from the data up to its own close, the time it
 was decided written next to it: a machine that was off catches up. `scripts/shadow_daily.sh
 SPEC ...`, from cron or the systemd user timer in `scripts/systemd/` (00:10 UTC, run at the
-next start if the machine was off; it records 011, 015, 017 and 019, whose positions differ, fetching the last weeks' positioning first), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
+next start if the machine was off; it records 011, 015, 017, 019 and 020, whose positions differ, fetching the last weeks' positioning first), fetches yesterday's bars and funding (`fetch_universe.py` now refuses an
 `--end` of today, whose bar Binance serves while it is still open and which would stay so)
 and records the decisions. `tests/test_shadow.py` checks a decision against what the
 held-out run holds the next day, also between rebalances, and that it is the same with
@@ -846,6 +858,7 @@ Backtests on public data; each verdict as the protocol recorded it in `results/`
 | 017 as 016, tested forward | failed on development as 016 (the same rule and variants); held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow; informs, decides nothing | as 016 |
 | 018 the crowd faded across coins: all accounts' long/short ratio, staggered, an hour after the close | passed on development (PBO 0.15 over its 4 variants, p after BH 0.011, deflated Sharpe 0.40 against 9 trials, reported); held out, opened once: confirmed | +44.4% a year 2022 .. 2023 (Sharpe from months 1.65, worst drawdown 19.8%; +28.3 and +60.5% by year); held out, January 2024 .. October 2026, +44.4% a year (Sharpe 1.54, worst drawdown 20.2%, beta 0.03, p 0.009), +7.0, +48.9 and +69.8% by year |
 | 019 as 018, tested forward | passed on development as 018; held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow | as 018 |
+| 020 019's rule and 017's as one book, 39% and 61%, each part to the same volatility over 2022 .. 2023 | written; held out forward, 2026-12-01 .. 2028-11-30, recorded by the shadow | in the rough look before it, +22.0% a year 2022 .. 2023 (Sharpe from months 1.96, worst drawdown 7.7%) and +22.6% over 2024 .. 2026, seen (1.72, worst drawdown 12.6%), against 1.65 and 1.54 for the crowd alone |
 
 The order flow forecasts the next seconds and volatility forecasts the size of the next
 moves, both out of sample; neither pays its fees, the maker's (Strategy above) or the
@@ -948,6 +961,27 @@ December 2021]: all accounts' long/short ratio held 7 days +28.2% a year (Sharpe
 7 days -5.1%; the takers' ratio -9.2%, though its rank IC was -0.069: the coins taken
 aggressively went on up in the body of the cross-section, not in its tails. Written as 018
 and 019.
+
+Inside 018, over its held-out years once opened [backtest, 2024 .. 2026]: the coins it
+trades had a median daily volume of $180M (the 5th percentile $51M), a trade at $10M of
+capital a median 0.04% of its coin's day (0.27% at the 99th percentile); with a square-root
+impact (the coin's daily volatility times the square root of the trade over its day's
+volume) on top of the 9 bp, +41.7% a year at $1M, +36.1% at $10M, +18.1% at $100M, half of
+it gone near $75M. Its result was narrow: 168 of the 398 coins it held made money, half of
+it came from three (MYX, AKE, LAB), and without its best five coins it made +5.1% a year,
+without its best ten -16.9%; before costs, its long half, the coins the crowd shorted, made
++36.8% a year over half the market, its short half +9.5%: mostly squeezes caught. Its
+development years were the same in kind (TRB a quarter of it). The strategies written so far
+as one book, an hour after the close [backtest; 2024 .. 2026 seen for every one of them]:
+the crowd and the trend on BTC and ETH moved apart (correlation of their days -0.00 over
+2022 .. 2023, +0.04 over 2024 .. 2026), the crowd and the carry less so over 2022 .. 2023
+(+0.32), the crowd and momentum not (+0.40, +0.32). Of four books weighted from 2022 ..
+2023's volatilities alone, the crowd, the carry and the trend in equal shares, each to the
+same volatility, or each the same share of the risk, or the crowd and the trend each to the
+same volatility, only the last was above the crowd alone in Sharpe over both periods (1.96
+and 1.72 against 1.65 and 1.54), at half its return; its return over its worst drawdown was
+above the crowd's over 2022 .. 2023 and below it over 2024 .. 2026. Within the noise of
+those years; written as 020, to be tested on days no one has seen.
 
 016 failed on development by its variants, not its rule: BTC and ETH or BTC alone did near
 the same, and of two variants near the same either is the better on a given half of the
